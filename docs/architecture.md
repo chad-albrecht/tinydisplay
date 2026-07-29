@@ -163,6 +163,60 @@ original. A boolean would have allowed the two to disagree.
 Magnification is nearest-neighbour for the same reason: a smooth filter would
 blur away the banding the operator is meant to see.
 
+## Why the HT32 driver is four layers
+
+The panel driver could have been one module. It is four — `protocol`, `device`,
+`transport`, `driver` — split along a single line: **what can be tested without
+hardware, and what cannot.**
+
+`protocol` turns arguments into bytes and does no I/O at all. That makes the
+part most likely to be wrong, and least likely to announce it, exhaustively
+testable: a bad packet produces a blank screen, not an error message. Every
+chunk of a full frame is built and asserted byte by byte in CI.
+
+`transport` is the only module that touches USB, and it sits behind a protocol
+with a recording implementation — the same trick the simulator plays with its
+preview window, for the same reason. `RecordingHidTransport` is not a mock; the
+driver cannot distinguish it from a real panel, so the framing, the lifecycle
+and the reconnection logic are all exercised with nothing plugged in, while the
+assertions remain about the exact bytes that would have reached the device.
+
+What is left in `driver` is small enough to read in one sitting: fixed
+geometry, frame assembly, retry.
+
+### Frames are all-or-nothing
+
+Every packet is built before the first is written, and a retry rewrites the
+frame from its start phase rather than resuming.
+
+The panel brackets a frame with start and end phases. A driver that streamed
+packets as it built them could fail partway and leave the panel waiting for an
+end phase that never arrives — a wedged device that needs a replug, caused by a
+bug that a validation check would have caught for free. Building first turns
+that into a clean exception with the panel untouched.
+
+Resuming a half-written frame has the same problem from the other end: if the
+cable moved, the panel's idea of how much it has received cannot be trusted.
+Rewriting is one extra frame of latency in a case that is already exceptional.
+
+### Blocking transports, async driver
+
+The transports are synchronous and blocking, and the driver hands whole frames
+to `asyncio.to_thread`.
+
+USB writes block. Wrapping each of the 27 packets in its own thread hop would
+pay the switch 27 times per frame to no benefit, so the boundary is drawn at
+the frame: one hop, one blocking run, the event loop free throughout. It is the
+same reasoning that keeps rendering synchronous — put the thread boundary where
+the I/O actually is, not wherever the API would look tidiest.
+
+### The LEDs are not part of the driver
+
+The LED strip is a CH340 serial bridge on its own USB interface, speaking an
+unrelated five-byte protocol. It is `LedController`, not a method on
+`HT32Driver`, because the two devices fail independently: a serial bridge that
+will not open is not a reason to stop painting frames.
+
 ## Dirty tracking
 
 Widgets carry a dirty flag that propagates to ancestors on change. Nothing in

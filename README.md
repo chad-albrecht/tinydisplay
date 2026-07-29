@@ -4,10 +4,12 @@
 from Home Assistant, with configurable dashboards that are not tied to any one
 device.
 
-> **Status: Phase 2, pre-alpha.** The rendering engine (`tinydisplay-core`) and
-> the desktop simulator (`tinydisplay-simulator`) are implemented and tested.
-> Hardware drivers, widgets, and the Home Assistant integration are not yet
-> written.
+> **Status: Phase 3, pre-alpha.** The rendering engine (`tinydisplay-core`), the
+> desktop simulator (`tinydisplay-simulator`) and the HT32 panel driver
+> (`tinydisplay-ht32`) are implemented and tested. The HT32 driver's wire
+> protocol is reconstructed from upstream source and **has not yet been
+> confirmed against a physical panel**. Widgets and the Home Assistant
+> integration are not yet written.
 
 ## Why
 
@@ -48,7 +50,7 @@ a canvas it never drew.
 | --- | --- | --- |
 | [`packages/core`](packages/core) | **Implemented** | Rendering engine: canvas, widgets, driver abstraction |
 | [`packages/simulator`](packages/simulator) | **Implemented** | Desktop preview, no hardware needed |
-| [`packages/ht32`](packages/ht32) | Planned | HT32 panel driver (320x170, RGB565, USB HID) |
+| [`packages/ht32`](packages/ht32) | **Implemented**, unverified on hardware | HT32 panel driver (320x170, RGB565, USB HID) |
 | [`packages/widgets`](packages/widgets) | Planned | Built-in widget library |
 | [`packages/homeassistant`](packages/homeassistant) | Planned | Home Assistant custom integration |
 
@@ -68,6 +70,14 @@ To see it live, run the simulator and edit the dashboard with the window open:
 
 ```bash
 uv run python -m tinydisplay.simulator examples/simulator_dashboard.py
+```
+
+With an HT32 panel attached, the same drawing code goes to hardware — or to a
+recorder, if you want to see the packets without owning one:
+
+```bash
+uv run python examples/ht32_panel.py            # needs a panel
+uv run python examples/ht32_panel.py --dry-run  # needs nothing
 ```
 
 Without `uv`:

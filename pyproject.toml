@@ -2,18 +2,19 @@
 members = ["packages/*"]
 exclude = [
     # Not yet implemented -- these directories hold planning stubs only.
-    "packages/ht32",
     "packages/homeassistant",
     "packages/widgets",
 ]
 
 [tool.uv.sources]
 tinydisplay-core = { workspace = true }
+tinydisplay-ht32 = { workspace = true }
 tinydisplay-simulator = { workspace = true }
 
 [dependency-groups]
 dev = [
     "tinydisplay-core",
+    "tinydisplay-ht32",
     "tinydisplay-simulator",
     "mypy>=1.11",
     "pre-commit>=3.8",
@@ -29,7 +30,7 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["packages/core/src", "packages/simulator/src", "tests"]
+src = ["packages/core/src", "packages/ht32/src", "packages/simulator/src", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -80,6 +81,13 @@ ignore = [
 "tests/simulator/test_window.py" = ["PLC0415"]
 "tests/simulator/test_cli.py" = ["PLC0415"]
 
+# Same reasoning for the HT32 transports: hidapi and pyserial are optional
+# extras carrying compiled code and USB permissions, so they are imported
+# inside the functions that need them. Importing tinydisplay.ht32 -- and
+# testing everything above the transport -- works without either installed.
+"packages/ht32/src/tinydisplay/ht32/device.py" = ["PLC0415"]
+"packages/ht32/src/tinydisplay/ht32/led.py" = ["PLC0415"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["tinydisplay"]
 
@@ -95,7 +103,7 @@ docstring-code-format = true
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "packages/core/src:packages/simulator/src"
+mypy_path = "packages/core/src:packages/ht32/src:packages/simulator/src"
 files = ["packages", "tests", "examples"]
 namespace_packages = true
 explicit_package_bases = true
@@ -106,14 +114,28 @@ enable_error_code = ["redundant-expr", "truthy-bool", "ignore-without-code"]
 module = ["PIL.*"]
 ignore_missing_imports = true
 
+# hidapi and pyserial are optional extras of tinydisplay-ht32, imported inside
+# the functions that need them. Neither ships type information, and neither is
+# installed in the default development environment.
+[[tool.mypy.overrides]]
+module = ["hid.*", "serial.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------------------
 # pytest
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "packages/core/src", "packages/simulator/src"]
-pythonpath = ["packages/core/src", "packages/simulator/src"]
+testpaths = ["tests", "packages/core/src", "packages/ht32/src", "packages/simulator/src"]
+pythonpath = ["packages/core/src", "packages/ht32/src", "packages/simulator/src"]
 asyncio_mode = "auto"
+markers = [
+    # Integration tests that need an HT32 panel physically attached. Deselected
+    # in CI with `-m "not hardware"`; the conftest also skips them when no
+    # panel is found, so running the suite locally with nothing plugged in
+    # reports skips rather than failures.
+    "hardware: requires an HT32 panel attached over USB",
+]
 addopts = [
     "--strict-markers",
     "--strict-config",

@@ -1,0 +1,46 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tinydisplay-ht32"
+version = "0.1.0"
+description = "HT32 panel driver for TinyDisplay: 320x170 RGB565 over USB HID, with CH340 LED control."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["display", "ht32", "usb", "hid", "embedded", "dashboard"]
+authors = [{ name = "The TinyDisplay authors" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Software Development :: Embedded Systems",
+    "Topic :: System :: Hardware :: Hardware Drivers",
+    "Typing :: Typed",
+]
+dependencies = [
+    # The rendering engine, the DisplayDriver contract and RGB565 packing.
+    "tinydisplay-core",
+    # Frame reshaping when packing chunks; already a core dependency.
+    "numpy>=1.26",
+]
+
+[project.optional-dependencies]
+# The transports are optional so that the protocol layer -- which is pure
+# byte arithmetic, and the part most worth testing -- installs and runs
+# anywhere, including a CI runner with no USB stack at all.
+hid = ["hidapi>=0.14"]
+led = ["pyserial>=3.5"]
+all = ["hidapi>=0.14", "pyserial>=3.5"]
+
+[project.urls]
+Homepage = "https://github.com/chad-albrecht/tinydisplay"
+Source = "https://github.com/chad-albrecht/tinydisplay"
+Issues = "https://github.com/chad-albrecht/tinydisplay/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tinydisplay"]
