@@ -30,7 +30,9 @@ to debug: if the simulator and the panel disagree, the driver is at fault.
 **`tinydisplay-ht32`.** The first real device: 320x170, RGB565, USB HID
 (VID:PID `04D9:FD01`), with LED control over a CH340 serial link at 10000 baud.
 
-- Device discovery and a HID transport.
+- Device discovery and a HID transport. The driver writes to the panel
+  directly rather than going through upstream's `ht32paneld` D-Bus daemon —
+  see [the package README](../packages/ht32/README.md) for why.
 - Frame chunking to the panel's report size.
 - Brightness and LED control.
 - Reconnection handling — USB devices disappear.
