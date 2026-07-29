@@ -148,6 +148,77 @@ class TestNodeSelection:
         assert probe.candidate_order([]) == []
 
 
+class TestInitCommands:
+    """The commands the panel may need before it will accept a frame.
+
+    These are pinned to the documented layout rather than to our driver,
+    because the driver does not send them yet -- that is the open question
+    these probes exist to answer.
+    """
+
+    def test_command_packets_are_full_size(self, probe: ModuleType) -> None:
+        assert len(probe.build_orientation()) == protocol.PACKET_SIZE
+        assert len(probe.build_heartbeat()) == protocol.PACKET_SIZE
+
+    def test_orientation_matches_the_documented_bytes(self, probe: ModuleType) -> None:
+        # Documented as 55 a1 f1 01, after the report ID the kernel strips.
+        assert list(probe.build_orientation()[:5]) == [0x00, 0x55, 0xA1, 0xF1, 0x01]
+
+    def test_heartbeat_is_a_set_time_command(self, probe: ModuleType) -> None:
+        packet = probe.build_heartbeat()
+        assert list(packet[:4]) == [0x00, 0x55, 0xA1, 0xF2]
+
+    def test_heartbeat_carries_a_plausible_clock(self, probe: ModuleType) -> None:
+        hour, minute, second = probe.build_heartbeat()[4:7]
+        assert 0 <= hour <= 23
+        assert 0 <= minute <= 59
+        assert 0 <= second <= 60
+
+    def test_command_signature_survives_the_report_id(self, probe: ModuleType) -> None:
+        # Byte 0 is stripped by the kernel, so the firmware sees 0x55 first.
+        packet = probe.build_command(0xA1, 0xF1)
+        assert packet[0] == 0x00
+        assert packet[1] == probe.SIGNATURE
+
+
+class TestHeaderVariant:
+    def test_swapping_moves_only_two_bytes(self, probe: ModuleType) -> None:
+        frame = bytes(protocol.FRAME_BYTES)
+        original = probe.build_packet(frame, 5)
+        swapped = probe.build_packet_seq_first(frame, 5)
+
+        assert swapped[3] == original[4]
+        assert swapped[4] == original[3]
+        assert swapped[:3] == original[:3]
+        assert swapped[5:] == original[5:]
+
+    def test_the_variant_is_not_the_default(self, probe: ModuleType) -> None:
+        # If these ever agree, the sweep is testing one hypothesis twice.
+        frame = bytes(protocol.FRAME_BYTES)
+        assert probe.build_packet(frame, 0) != probe.build_packet_seq_first(frame, 0)
+
+
+class TestSweep:
+    def test_every_variant_paints_a_distinct_colour(self, probe: ModuleType) -> None:
+        # The whole method depends on the colour identifying the variant.
+        colours = [entry[-1] for entry in probe.SWEEP]
+        assert len(colours) == len(set(colours))
+
+    def test_every_sweep_colour_is_a_real_pattern(self, probe: ModuleType) -> None:
+        for entry in probe.SWEEP:
+            assert entry[-1] in probe.SOLIDS
+
+    def test_solid_patterns_fill_the_panel(self, probe: ModuleType) -> None:
+        frame = probe.build_frame("red")
+        assert len(frame) == protocol.FRAME_BYTES
+        assert frame[0:2] == frame[2:4] == bytes([0xF8, 0x00])
+
+    def test_the_leading_hypothesis_is_first(self, probe: ModuleType) -> None:
+        # Ordering is the point: the cheapest explanation should be tried
+        # before the exotic ones, so a success needs no further reading.
+        assert probe.SWEEP[0][0] == "orientation + heartbeat"
+
+
 class TestInitDelay:
     def test_matches_the_package_default(self, probe: ModuleType) -> None:
         # The standalone copy waiting a different amount than the driver would

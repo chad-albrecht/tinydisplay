@@ -47,7 +47,12 @@ PANEL_WIDTH = 320
 PANEL_HEIGHT = 170
 
 SIGNATURE = 0x55
+COMMAND_CONFIG = 0xA1
+COMMAND_PARTIAL = 0xA2
 COMMAND_REDRAW = 0xA3
+SUB_ORIENTATION = 0xF1
+SUB_SET_TIME = 0xF2
+ORIENTATION_LANDSCAPE = 0x01
 PHASE_START, PHASE_CONTINUE, PHASE_END = 0xF0, 0xF1, 0xF2
 
 REPORT_SIZE = 1
@@ -76,6 +81,20 @@ BARS = (
     ("black", (0, 0, 0)),
 )
 
+# Sweep variants paint distinct flat colours so that whatever is left on the
+# panel at the end names the variant that worked. It is the panel reporting its
+# own result, which beats asking somebody to watch eight transfers go by.
+SOLIDS = {
+    "red": (255, 0, 0),
+    "green": (0, 255, 0),
+    "blue": (0, 0, 255),
+    "yellow": (255, 255, 0),
+    "cyan": (0, 255, 255),
+    "magenta": (255, 0, 255),
+    "orange": (255, 128, 0),
+    "purple": (128, 0, 255),
+}
+
 
 # -- Pixel packing ----------------------------------------------------------
 
@@ -98,6 +117,8 @@ def build_frame(pattern: str) -> bytes:
             elif pattern == "gradient":
                 level = x * 255 // (PANEL_WIDTH - 1)
                 colour = (level, level, level)
+            elif pattern in SOLIDS:
+                colour = SOLIDS[pattern]
             else:  # black
                 colour = (0, 0, 0)
 
@@ -149,6 +170,57 @@ def build_packet(frame: bytes, index: int) -> bytes:
 def build_packets(frame: bytes) -> list[bytes]:
     """Every packet needed to paint ``frame``, in transmission order."""
     return [build_packet(frame, index) for index in range(CHUNK_COUNT)]
+
+
+def build_packet_seq_first(frame: bytes, index: int) -> bytes:
+    """A redraw packet with the sequence and phase bytes swapped.
+
+    Sources disagree about which of bytes 2 and 3 (device-side) holds the
+    phase and which holds the sequence counter. This is the other reading, so
+    the panel can settle it instead of a document.
+    """
+    packet = bytearray(build_packet(frame, index))
+    packet[3], packet[4] = packet[4], packet[3]
+    return bytes(packet)
+
+
+def build_command(command: int, sub_command: int, params: bytes = b"") -> bytes:
+    """Build a non-redraw command packet.
+
+    Byte 0 is the HID report ID, which the kernel strips before the report
+    reaches the device -- so the signature the firmware sees is at its byte 0,
+    as documented.
+    """
+    packet = bytearray(PACKET_SIZE)
+    packet[1] = SIGNATURE
+    packet[2] = command
+    packet[3] = sub_command
+    packet[4 : 4 + len(params)] = params
+    return bytes(packet)
+
+
+def build_orientation(landscape: bool = True) -> bytes:
+    """Tell the panel which way up it is. Documented as 0x55 A1 F1 01."""
+    return build_command(
+        COMMAND_CONFIG,
+        SUB_ORIENTATION,
+        bytes([ORIENTATION_LANDSCAPE if landscape else 0x02]),
+    )
+
+
+def build_heartbeat() -> bytes:
+    """The keep-alive the firmware expects roughly every second.
+
+    Documented as a set-time command carrying the wall clock. The panel is
+    believed to want this to stay in host-driven mode, which is the leading
+    explanation for a panel that accepts frames and draws none.
+    """
+    now = time.localtime()
+    return build_command(
+        COMMAND_CONFIG,
+        SUB_SET_TIME,
+        bytes([now.tm_hour, now.tm_min, now.tm_sec]),
+    )
 
 
 # -- Finding the panel ------------------------------------------------------
@@ -226,7 +298,12 @@ def candidate_order(nodes: list[tuple[Path, int]]) -> list[Path]:
 # -- Writing ----------------------------------------------------------------
 
 
-def send(target: Path, packets: list[bytes], init_delay: float = DEFAULT_INIT_DELAY) -> str | None:
+def send(
+    target: Path,
+    packets: list[bytes],
+    init_delay: float = DEFAULT_INIT_DELAY,
+    chunk_delay: float = 0.0,
+) -> str | None:
     """Write every packet to ``target``.
 
     Returns ``None`` on success, or a description of what went wrong. A string
@@ -252,12 +329,85 @@ def send(target: Path, packets: list[bytes], init_delay: float = DEFAULT_INIT_DE
             written = os.write(fd, packet)
             if written != len(packet):
                 return f"short write on packet {index}: {written} of {len(packet)} bytes"
+            # The firmware is documented as wanting brief pauses between
+            # transmissions; writing 27 reports flat out may overrun it.
+            if chunk_delay > 0:
+                time.sleep(chunk_delay)
     except OSError as exc:
         return f"write failed on packet {index}: {exc}"
     finally:
         os.close(fd)
 
     return None
+
+
+# -- Sweep ------------------------------------------------------------------
+
+# Each entry is (name, send_orientation, send_heartbeat, seq_first, chunk_delay)
+# paired with the colour it paints. Ordered cheapest-hypothesis first: the
+# leading suspicion is that the panel needs to be told it is host-driven before
+# it will accept a frame.
+SWEEP = (
+    ("orientation + heartbeat", True, True, False, 0.002, "red"),
+    ("orientation only", True, False, False, 0.002, "green"),
+    ("heartbeat only", False, True, False, 0.002, "blue"),
+    ("no init, paced writes", False, False, False, 0.002, "yellow"),
+    ("orientation + heartbeat, seq/phase swapped", True, True, True, 0.002, "cyan"),
+    ("seq/phase swapped, no init", False, False, True, 0.002, "magenta"),
+    ("orientation + heartbeat, unpaced", True, True, False, 0.0, "orange"),
+    ("no init, unpaced (what already failed)", False, False, False, 0.0, "purple"),
+)
+
+
+def sweep(target: Path, init_delay: float, settle: float) -> int:
+    """Try every plausible command sequence, one per colour.
+
+    Nothing here is a guess about what is *correct* -- it is eight readings of
+    ambiguous documentation, offered to the only authority that can settle it.
+    Whatever colour the panel is showing at the end identifies a sequence that
+    works; the mapping is printed so the answer needs no interpretation.
+    """
+    print("")
+    print(f"sweeping {len(SWEEP)} command sequences on {target}")
+    print("each paints a different flat colour -- note the colour left on the panel")
+    print("")
+
+    accepted = []
+    for number, (name, orientation, heartbeat, seq_first, chunk_delay, colour) in enumerate(
+        SWEEP, start=1
+    ):
+        frame = build_frame(colour)
+        packets = []
+        if orientation:
+            packets.append(build_orientation())
+        if heartbeat:
+            packets.append(build_heartbeat())
+        builder = build_packet_seq_first if seq_first else build_packet
+        packets += [builder(frame, index) for index in range(CHUNK_COUNT)]
+
+        print(f"{number}. {colour:<8} {name}")
+        problem = send(target, packets, init_delay, chunk_delay)
+        if problem is not None:
+            print(f"     rejected: {problem}")
+        else:
+            accepted.append((number, colour, name))
+        # Let the panel settle, and leave the colour visible long enough that a
+        # brief flash is not mistaken for nothing happening.
+        time.sleep(settle)
+
+    print("")
+    if not accepted:
+        print("every sequence was rejected at the transport level")
+        return 1
+
+    print("all of these were accepted without error:")
+    for number, colour, name in accepted:
+        print(f"  {number}. {colour:<8} {name}")
+    print("")
+    print("Look at the panel now. Whatever colour it shows is the LAST sequence")
+    print("that actually drew. If it is still unchanged, none of them worked and")
+    print("the fault is in the packet contents rather than the sequence.")
+    return 0
 
 
 # -- Entry point ------------------------------------------------------------
@@ -267,9 +417,38 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--pattern",
-        choices=("bars", "white", "gradient", "black"),
+        choices=("bars", "white", "gradient", "black", *SOLIDS),
         default="bars",
         help="What to draw (default: bars).",
+    )
+    parser.add_argument(
+        "--sweep",
+        action="store_true",
+        help=(
+            "Try every plausible command sequence, each in a different colour. "
+            "Use this when the panel accepts frames but does not change."
+        ),
+    )
+    parser.add_argument(
+        "--settle",
+        type=float,
+        default=2.0,
+        help="Seconds to leave each sweep colour on screen (default: 2.0).",
+    )
+    parser.add_argument(
+        "--chunk-delay",
+        type=float,
+        default=0.002,
+        help="Seconds between chunk writes (default: 0.002).",
+    )
+    parser.add_argument(
+        "--init",
+        choices=("full", "orientation", "heartbeat", "none"),
+        default="full",
+        help=(
+            "Which commands to send before the frame (default: full, meaning "
+            "orientation then heartbeat)."
+        ),
     )
     parser.add_argument(
         "--node",
@@ -302,8 +481,14 @@ def main() -> int:
     targets = [Path(args.node)] if args.node is not None else candidate_order(nodes)
 
     print(f"building a {args.pattern} frame ({FRAME_BYTES} bytes)")
-    packets = build_packets(build_frame(args.pattern))
-    print(f"{len(packets)} packets of {PACKET_SIZE} bytes")
+    frame = build_frame(args.pattern)
+    packets: list[bytes] = []
+    if args.init in ("full", "orientation"):
+        packets.append(build_orientation())
+    if args.init in ("full", "heartbeat"):
+        packets.append(build_heartbeat())
+    packets += build_packets(frame)
+    print(f"{len(packets)} packets of {PACKET_SIZE} bytes (init: {args.init})")
 
     if args.dry_run:
         print(f"dry run: would try {', '.join(str(path) for path in targets) or '(nothing)'}")
@@ -318,10 +503,19 @@ def main() -> int:
         )
         return 1
 
+    if args.sweep:
+        # Sweeping needs a node that accepts writes; find one with the ordinary
+        # path first so a sweep is never run against the wrong interface.
+        for candidate in targets:
+            if send(candidate, packets, args.init_delay, args.chunk_delay) is None:
+                return sweep(candidate, args.init_delay, args.settle)
+        print("no node accepted a frame, so there is nothing to sweep", file=sys.stderr)
+        return 1
+
     target = None
     for candidate in targets:
         print(f"trying {candidate} (waiting {args.init_delay}s for the panel to wake)")
-        problem = send(candidate, packets, args.init_delay)
+        problem = send(candidate, packets, args.init_delay, args.chunk_delay)
         if problem is None:
             target = candidate
             break
