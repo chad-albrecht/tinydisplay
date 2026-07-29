@@ -26,6 +26,7 @@ from typing import TYPE_CHECKING, Any, Final, NoReturn, Protocol, runtime_checka
 
 from tinydisplay.ht32.device import HT32DeviceInfo, find_panel, import_hid
 from tinydisplay.ht32.errors import DeviceNotFoundError, TransportError
+from tinydisplay.ht32.hidraw import HidrawTransport, enumerate_hidraw, is_hidraw_available
 from tinydisplay.ht32.protocol import PACKET_SIZE, PRODUCT_ID, VENDOR_ID
 
 if TYPE_CHECKING:
@@ -36,6 +37,7 @@ __all__ = [
     "HidTransport",
     "PanelTransport",
     "RecordingHidTransport",
+    "create_panel_transport",
     "packet_summary",
 ]
 
@@ -295,6 +297,33 @@ class HidTransport:
         """
         self.close()
         raise TransportError(message) from cause
+
+
+def create_panel_transport(
+    *,
+    serial_number: str | None = None,
+    prefer_hidraw: bool = True,
+) -> PanelTransport:
+    """Build the best transport this machine can actually use.
+
+    Prefers Linux ``hidraw`` when a matching node is visible, because it needs
+    no compiled USB library -- which is precisely the situation on the
+    appliance-style machines this panel tends to be built into. Falls back to
+    hidapi everywhere else.
+
+    Args:
+        serial_number: Restrict hidapi discovery to a panel with this serial.
+            Ignored by the hidraw path, which identifies nodes by hardware ID.
+        prefer_hidraw: Set False to force hidapi even where hidraw would work.
+
+    Note that this only *selects*; nothing is opened until the driver connects,
+    so a wrong guess surfaces as a connection error rather than a silent
+    fallback to a transport that cannot work.
+    """
+    if prefer_hidraw and serial_number is None and is_hidraw_available() and enumerate_hidraw():
+        return HidrawTransport()
+
+    return HidTransport(serial_number=serial_number)
 
 
 def packet_summary(packets: Sequence[bytes]) -> str:

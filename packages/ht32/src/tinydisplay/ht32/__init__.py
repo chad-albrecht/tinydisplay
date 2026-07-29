@@ -53,6 +53,13 @@ from tinydisplay.ht32.errors import (
     ProtocolError,
     TransportError,
 )
+from tinydisplay.ht32.hidraw import (
+    HidrawDeviceInfo,
+    HidrawTransport,
+    enumerate_hidraw,
+    find_hidraw_panel,
+    is_hidraw_available,
+)
 from tinydisplay.ht32.led import (
     DEFAULT_BAUD_RATE,
     LedController,
@@ -85,6 +92,7 @@ from tinydisplay.ht32.transport import (
     HidTransport,
     PanelTransport,
     RecordingHidTransport,
+    create_panel_transport,
 )
 
 __version__ = "0.1.0"
@@ -108,6 +116,8 @@ __all__ = [
     "HT32Driver",
     "HT32Error",
     "HidTransport",
+    "HidrawDeviceInfo",
+    "HidrawTransport",
     "LedController",
     "LedError",
     "LedTheme",
@@ -125,9 +135,13 @@ __all__ = [
     "build_led_packet",
     "build_redraw_packet",
     "build_refresh_packet",
+    "create_panel_transport",
+    "enumerate_hidraw",
     "enumerate_panels",
+    "find_hidraw_panel",
     "find_led_port",
     "find_panel",
     "is_hid_available",
+    "is_hidraw_available",
     "iter_redraw_packets",
 ]

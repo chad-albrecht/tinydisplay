@@ -11,6 +11,26 @@ the sanctioned way to get code onto the box with USB access.
 This is a diagnostic, not a service. It runs one command, prints the result to
 the add-on log, and exits.
 
+## Try the one-file probe first
+
+If the *Advanced SSH & Web Terminal* add-on is installed with Protection Mode
+off, and `ls /dev/hidraw*` lists devices there, you do not need this add-on at
+all. [`tools/ht32_standalone_probe.py`](../../tools/ht32_standalone_probe.py)
+is a single standard-library file — no numpy, no Pillow, no hidapi, no build:
+
+```bash
+wget https://raw.githubusercontent.com/chad-albrecht/tinydisplay/main/tools/ht32_standalone_probe.py
+python3 ht32_standalone_probe.py
+```
+
+It finds the panel through sysfs and writes frames straight to `/dev/hidrawN`,
+which on Linux is exactly what hidapi would do. Its framing is pinned to the
+real driver byte-for-byte by `tests/ht32/test_standalone_probe.py`, so a
+result from it is a result about `tinydisplay-ht32`.
+
+Use the add-on below when you want the actual package on the box — the full
+CLI, the LED bridge, and something that survives a restart.
+
 ## Install
 
 1. **Get file access to the box.** Install either the *Samba share* add-on or

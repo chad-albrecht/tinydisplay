@@ -74,6 +74,12 @@ ignore = [
 ]
 "examples/**" = ["T20"]  # Examples print to stdout on purpose.
 
+# The standalone probe is a single self-contained file meant to be copied onto
+# an appliance and run with nothing installed. Printing is its whole interface,
+# and it may not import from the package it duplicates -- that duplication is
+# guarded by tests/ht32/test_standalone_probe.py instead.
+"tools/**" = ["T20"]
+
 # Tk is imported inside the functions that need it, never at module scope, so
 # that importing the simulator -- or collecting its tests -- works on a machine
 # with no GUI toolkit installed. See tinydisplay.simulator.window.

@@ -39,7 +39,7 @@ from tinydisplay.ht32.protocol import (
     build_refresh_packet,
     iter_redraw_packets,
 )
-from tinydisplay.ht32.transport import HidTransport
+from tinydisplay.ht32.transport import create_panel_transport
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -62,7 +62,9 @@ class HT32Driver(DisplayDriver):
     """Drive an HT32 panel over USB HID.
 
     Args:
-        transport: Where packets go. Defaults to a real USB connection; pass a
+        transport: Where packets go. Defaults to whichever real transport this
+            machine can use -- Linux ``hidraw`` when a panel node is visible,
+            hidapi otherwise. Pass a
             :class:`~tinydisplay.ht32.transport.RecordingHidTransport` to run
             with no hardware attached.
         name: Human-readable identifier used in errors and logs.
@@ -95,7 +97,9 @@ class HT32Driver(DisplayDriver):
             raise HT32Error(msg)
 
         self._transport = (
-            transport if transport is not None else HidTransport(serial_number=serial_number)
+            transport
+            if transport is not None
+            else create_panel_transport(serial_number=serial_number)
         )
         self._owns_transport = transport is None
         self._auto_reconnect = auto_reconnect

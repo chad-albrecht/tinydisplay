@@ -31,6 +31,13 @@ from tinydisplay.ht32.device import (
 )
 from tinydisplay.ht32.driver import HT32Driver
 from tinydisplay.ht32.errors import HT32Error
+from tinydisplay.ht32.hidraw import (
+    HidrawDeviceInfo,
+    HidrawTransport,
+    enumerate_hidraw,
+    is_hidraw_available,
+    select_display_node,
+)
 from tinydisplay.ht32.led import LedController, LedTheme, RecordingLedTransport
 from tinydisplay.ht32.patterns import PATTERNS, draw_pattern
 from tinydisplay.ht32.protocol import CHUNK_COUNT, PACKET_SIZE, PRODUCT_ID, VENDOR_ID
@@ -89,6 +96,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     frame.add_argument("--serial", default=None, help="Restrict to a panel with this serial.")
     frame.add_argument(
+        "--hidraw",
+        default=None,
+        metavar="PATH",
+        help=(
+            "Write straight to this /dev/hidrawN node, skipping discovery and "
+            "needing no USB library. Useful when the panel is found but not opened."
+        ),
+    )
+    frame.add_argument(
         "--dry-run",
         action="store_true",
         help="Write to a recorder instead of the panel.",
@@ -124,11 +140,32 @@ def run_probe(*, try_open: bool) -> int:
     """Report what is on the bus. Returns a process exit status."""
     _report(f"looking for {VENDOR_ID:04X}:{PRODUCT_ID:04X}")
 
+    # hidraw first: it needs no USB library, so on Linux it is both the more
+    # likely route to work and the cheaper one to check.
+    hidraw_nodes = enumerate_hidraw() if is_hidraw_available() else ()
+    if hidraw_nodes:
+        _report(f"hidraw:  {len(hidraw_nodes)} node(s)")
+        for node in hidraw_nodes:
+            marker = " <- display" if node.is_display_interface else ""
+            _report(f"  {node.path} if{node.interface_number}{marker}")
+    elif is_hidraw_available():
+        _report("hidraw:  available, but no node reports this hardware ID")
+    else:
+        _report("hidraw:  not available (not Linux, or no device nodes here)")
+
     if not is_hid_available():
         _report("hidapi:  NOT INSTALLED -- install tinydisplay-ht32[hid]")
-        return 2
-    _report("hidapi:  available")
+        if not hidraw_nodes:
+            return 2
+        # hidraw alone is enough to drive the panel, so this is not fatal.
+        return _probe_hidraw(hidraw_nodes, try_open=try_open)
 
+    _report("hidapi:  available")
+    return _probe_hidapi(try_open=try_open)
+
+
+def _probe_hidapi(*, try_open: bool) -> int:
+    """Report what hidapi enumeration finds."""
     try:
         devices = enumerate_panels()
     except HT32Error as exc:
@@ -162,6 +199,29 @@ def run_probe(*, try_open: bool) -> int:
     return _try_open(selected)
 
 
+def _probe_hidraw(nodes: Sequence[HidrawDeviceInfo], *, try_open: bool) -> int:
+    """Report on the hidraw route when hidapi is unavailable."""
+    chosen = select_display_node(nodes)
+    if chosen is None:  # pragma: no cover - unreachable while nodes is non-empty
+        return 1
+    _report(f"chosen:  {chosen.path} (hidraw needs no USB library)")
+
+    if not try_open:
+        _report("")
+        _report("Re-run with --open to check permissions as well.")
+        return 0
+
+    transport = HidrawTransport(device=chosen)
+    try:
+        transport.open()
+    except HT32Error as exc:
+        _report(f"open:    FAILED -- {exc}")
+        return 1
+    transport.close()
+    _report("open:    ok")
+    return 0
+
+
 def _try_open(device: HT32DeviceInfo) -> int:
     """Open the chosen interface, which is where permissions fail."""
     transport = HidTransport(device=device)
@@ -175,10 +235,25 @@ def _try_open(device: HT32DeviceInfo) -> int:
     return 0
 
 
-async def run_frame(*, pattern: str, repeat: int, serial: str | None, dry_run: bool) -> int:
+async def run_frame(
+    *,
+    pattern: str,
+    repeat: int,
+    serial: str | None,
+    dry_run: bool,
+    hidraw: str | None = None,
+) -> int:
     """Draw a pattern on the panel. Returns a process exit status."""
-    recorder = RecordingHidTransport(max_packets=CHUNK_COUNT) if dry_run else None
-    driver = HT32Driver(transport=recorder, serial_number=serial)
+    transport: RecordingHidTransport | HidrawTransport | None
+    if dry_run:
+        transport = RecordingHidTransport(max_packets=CHUNK_COUNT)
+    elif hidraw is not None:
+        transport = HidrawTransport(path=hidraw)
+    else:
+        transport = None
+
+    recorder = transport if isinstance(transport, RecordingHidTransport) else None
+    driver = HT32Driver(transport=transport, serial_number=serial)
 
     try:
         async with driver:
@@ -265,6 +340,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     repeat=args.repeat,
                     serial=args.serial,
                     dry_run=args.dry_run,
+                    hidraw=args.hidraw,
                 )
             )
         return asyncio.run(

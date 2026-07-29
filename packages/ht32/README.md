@@ -6,21 +6,28 @@ A `DisplayDriver` for the [HT32 panel][ht32]: 320x170, RGB565, over USB HID.
 | --- | --- |
 | Resolution | 320 x 170 |
 | Colour format | RGB565, **big-endian** on the wire |
-| Transport | USB HID, interface 1 |
+| Transport | USB HID — Linux `hidraw`, or hidapi |
 | Hardware ID | VID:PID `04D9:FD01` |
 | Frame | 108,800 bytes in 27 packets of 4,105 |
 | LED control | CH340 serial bridge, 10000 baud |
 
 ## Install
 
-The USB and serial backends are optional extras, so the protocol layer installs
-anywhere — including a CI runner with no USB stack:
-
 ```bash
-pip install tinydisplay-ht32[all]     # panel and LEDs
-pip install tinydisplay-ht32[hid]     # panel only
-pip install tinydisplay-ht32          # packet building only, no I/O
+pip install tinydisplay-ht32          # enough to drive the panel on Linux
+pip install tinydisplay-ht32[led]     # adds the CH340 LED bridge
+pip install tinydisplay-ht32[hid]     # adds hidapi, for Windows and macOS
 ```
+
+**On Linux you need no extras.** `/dev/hidrawN` takes an ordinary `write()`
+whose first byte is the HID report ID, which is exactly what our packets carry,
+so the default transport is a file descriptor and the standard library. That
+matters because the machines this panel is built into are the worst places to
+install a compiled USB library: Home Assistant OS has no compiler, and PyPI
+publishes no `musllinux` wheel for hidapi.
+
+`hidapi` is for the platforms without hidraw. `create_panel_transport()` picks
+between them, preferring hidraw when a matching node is visible.
 
 ## Use
 
@@ -71,8 +78,9 @@ async with LedController() as leds:
 | Module | Responsibility |
 | --- | --- |
 | `protocol` | Constants and packet building. **No I/O**, so it is exhaustively testable. |
-| `device` | Finding panels on the USB bus. |
-| `transport` | Writing packets: `HidTransport` for real, `RecordingHidTransport` for memory. |
+| `hidraw` | Linux `/dev/hidrawN`: sysfs discovery and writes, no dependencies. |
+| `device` | Finding panels through hidapi, for platforms without hidraw. |
+| `transport` | Writing packets: `HidTransport` for hidapi, `RecordingHidTransport` for memory. |
 | `driver` | The `DisplayDriver`: geometry, frame assembly, reconnection. |
 | `led` | The CH340 bridge. Deliberately not part of the driver. |
 
@@ -154,8 +162,13 @@ The patterns are chosen so failures look specific rather than merely wrong:
 | `chunks` | Framing | A band sits in the wrong place — and its index is the packet number. |
 | `black` | — | Blanks the panel when you are done. |
 
-On a machine running Home Assistant OS, where there is no shell to run any of
-this from, see [`deploy/hassio-addon/`](../../deploy/hassio-addon/).
+For a machine with nothing installed and no way to install anything —
+a Home Assistant OS box, for instance —
+[`tools/ht32_standalone_probe.py`](../../tools/ht32_standalone_probe.py) is a
+single standard-library file that does the same job. It duplicates the framing
+deliberately, and `tests/ht32/test_standalone_probe.py` asserts byte-for-byte
+that the copy still agrees with this package. See also
+[`deploy/hassio-addon/`](../../deploy/hassio-addon/).
 
 ### Unverified against hardware
 
