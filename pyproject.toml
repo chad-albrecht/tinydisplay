@@ -3,19 +3,20 @@ members = ["packages/*"]
 exclude = [
     # Not yet implemented -- these directories hold planning stubs only.
     "packages/homeassistant",
-    "packages/widgets",
 ]
 
 [tool.uv.sources]
 tinydisplay-core = { workspace = true }
 tinydisplay-ht32 = { workspace = true }
 tinydisplay-simulator = { workspace = true }
+tinydisplay-widgets = { workspace = true }
 
 [dependency-groups]
 dev = [
     "tinydisplay-core",
     "tinydisplay-ht32",
     "tinydisplay-simulator",
+    "tinydisplay-widgets",
     "mypy>=1.11",
     "pre-commit>=3.8",
     "pytest>=8.3",
@@ -30,7 +31,13 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["packages/core/src", "packages/ht32/src", "packages/simulator/src", "tests"]
+src = [
+    "packages/core/src",
+    "packages/ht32/src",
+    "packages/simulator/src",
+    "packages/widgets/src",
+    "tests",
+]
 
 [tool.ruff.lint]
 select = [
@@ -114,7 +121,7 @@ python_version = "3.12"
 # runs on. CI checks on Linux; this makes a developer's local run agree with it.
 platform = "linux"
 strict = true
-mypy_path = "packages/core/src:packages/ht32/src:packages/simulator/src"
+mypy_path = "packages/core/src:packages/ht32/src:packages/simulator/src:packages/widgets/src"
 files = ["packages", "tests", "examples"]
 namespace_packages = true
 explicit_package_bases = true
@@ -132,13 +139,31 @@ ignore_missing_imports = true
 module = ["hid.*", "serial.*"]
 ignore_missing_imports = true
 
+# examples/ is a directory of scripts rather than a package, so one example
+# importing another has to put its own directory on sys.path. That works at
+# runtime and is invisible to a type checker.
+[[tool.mypy.overrides]]
+module = ["widget_dashboard"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------------------
 # pytest
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "packages/core/src", "packages/ht32/src", "packages/simulator/src"]
-pythonpath = ["packages/core/src", "packages/ht32/src", "packages/simulator/src"]
+testpaths = [
+    "tests",
+    "packages/core/src",
+    "packages/ht32/src",
+    "packages/simulator/src",
+    "packages/widgets/src",
+]
+pythonpath = [
+    "packages/core/src",
+    "packages/ht32/src",
+    "packages/simulator/src",
+    "packages/widgets/src",
+]
 asyncio_mode = "auto"
 markers = [
     # Integration tests that need an HT32 panel physically attached. Deselected

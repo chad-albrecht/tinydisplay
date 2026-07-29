@@ -80,13 +80,36 @@ reason this phase took a while:
 See [the package README](../packages/ht32/README.md) for the reconstructed wire
 protocol and what each source got wrong.
 
-## Phase 4 — Widget library
+## Phase 4 — Widget library ✅
 
 **`tinydisplay-widgets`.** The vocabulary a dashboard is written in.
 
-- Layout: stack, grid, padding, alignment.
-- Content: label, icon, gauge, sparkline, progress bar, image.
-- Theming: a palette resolved against the target panel's colour depth.
+- Layout: `Stack` with fixed and weighted slots, `Grid` with spans, `Padding`,
+  `Spacer`, cross-axis alignment. Containers assign bounds to their children,
+  because core widgets deliberately carry geometry and no layout logic.
+- Content: `Label` with wrapping and shrink-to-fit, `ProgressBar`, `Gauge`,
+  `Sparkline`, `Icon`, `ImageWidget`.
+- Theming: `Theme` names colour by role, and `Theme.quantized()` resolves the
+  palette against the panel's colour depth.
+
+Three decisions worth knowing:
+
+**Children fill their space exactly.** Rounding is accumulated across a row
+rather than applied per child. A one-pixel gap per child is a rounding detail
+on a monitor and a visible seam on a 320-pixel panel.
+
+**Themes are checked after quantisation.** RGB565 has 32 levels of red, so a
+contrast ratio measured on the colours a designer picked is not the ratio the
+hardware delivers. The built-in themes are tested for legibility as the panel
+renders them.
+
+**Widgets clamp, constructors raise.** A gauge fed 150% draws full, because a
+surprising sensor reading must not stop a render loop. A gauge built with zero
+segments raises, because that is a bug that would otherwise ship as a silently
+wrong panel.
+
+Deliberately absent: intrinsic sizing (no `measure()`, so slots are fixed or
+weighted rather than content-sized) and scrolling or animation.
 
 ## Phase 5 — Home Assistant integration
 

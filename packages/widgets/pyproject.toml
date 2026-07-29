@@ -1,0 +1,35 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tinydisplay-widgets"
+version = "0.1.0"
+description = "Widget library for TinyDisplay: layout, labels, gauges and theming for small panels."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["display", "widgets", "layout", "dashboard", "embedded"]
+authors = [{ name = "The TinyDisplay authors" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Software Development :: Embedded Systems",
+    "Typing :: Typed",
+]
+dependencies = [
+    # Canvas, Color, geometry and the Widget contract.
+    "tinydisplay-core",
+]
+
+[project.urls]
+Homepage = "https://github.com/chad-albrecht/tinydisplay"
+Source = "https://github.com/chad-albrecht/tinydisplay"
+Issues = "https://github.com/chad-albrecht/tinydisplay/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tinydisplay"]

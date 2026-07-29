@@ -4,11 +4,12 @@
 from Home Assistant, with configurable dashboards that are not tied to any one
 device.
 
-> **Status: Phase 3, pre-alpha.** The rendering engine (`tinydisplay-core`), the
-> desktop simulator (`tinydisplay-simulator`) and the HT32 panel driver
-> (`tinydisplay-ht32`) are implemented and tested, and the HT32 driver is
-> **confirmed working on real hardware** — an AceMagic S1's built-in panel.
-> Widgets and the Home Assistant integration are not yet written.
+> **Status: Phase 4, pre-alpha.** The rendering engine (`tinydisplay-core`), the
+> desktop simulator (`tinydisplay-simulator`), the HT32 panel driver
+> (`tinydisplay-ht32`) and the widget library (`tinydisplay-widgets`) are
+> implemented and tested, and the HT32 driver is **confirmed working on real
+> hardware** — an AceMagic S1's built-in panel. The Home Assistant integration
+> is not yet written.
 
 ## Why
 
@@ -50,7 +51,7 @@ a canvas it never drew.
 | [`packages/core`](packages/core) | **Implemented** | Rendering engine: canvas, widgets, driver abstraction |
 | [`packages/simulator`](packages/simulator) | **Implemented** | Desktop preview, no hardware needed |
 | [`packages/ht32`](packages/ht32) | **Implemented**, verified on hardware | HT32 panel driver (320x170, RGB565, raw USB) |
-| [`packages/widgets`](packages/widgets) | Planned | Built-in widget library |
+| [`packages/widgets`](packages/widgets) | **Implemented** | Layout, labels, gauges, icons, theming |
 | [`packages/homeassistant`](packages/homeassistant) | Planned | Home Assistant custom integration |
 
 See [docs/architecture.md](docs/architecture.md) for the reasoning behind the
@@ -71,12 +72,19 @@ To see it live, run the simulator and edit the dashboard with the window open:
 uv run python -m tinydisplay.simulator examples/simulator_dashboard.py
 ```
 
+A dashboard built from the widget library, rather than by hand:
+
+```bash
+uv run python -m tinydisplay.simulator examples/widget_dashboard.py
+```
+
 With an HT32 panel attached, the same drawing code goes to hardware — or to a
 recorder, if you want to see the packets without owning one:
 
 ```bash
-uv run python examples/ht32_panel.py            # needs a panel
-uv run python examples/ht32_panel.py --dry-run  # needs nothing
+uv run python examples/ht32_panel.py                 # a test pattern
+uv run python examples/ht32_widget_dashboard.py      # the dashboard above
+uv run python examples/ht32_panel.py --dry-run       # needs nothing
 ```
 
 Without `uv`:
