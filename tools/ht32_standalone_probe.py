@@ -27,11 +27,21 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from pathlib import Path
 
 VENDOR_ID = 0x04D9
 PRODUCT_ID = 0xFD01
+# Upstream hard-codes interface 1, but real units disagree: an AceMagic S1
+# reports interfaces 0 and 2 and no interface 1 at all. So this is a
+# preference, not a requirement -- when it is absent, every node the panel
+# publishes is tried in turn and whichever accepts a frame is the display.
 LCD_INTERFACE = 1
+
+# The panel enumerates before it can be spoken to. Upstream waits a full second
+# after opening and before the first command; writing inside that window gets
+# no response, which surfaces as ETIMEDOUT rather than as anything descriptive.
+DEFAULT_INIT_DELAY = 1.0
 
 PANEL_WIDTH = 320
 PANEL_HEIGHT = 170
@@ -198,35 +208,56 @@ def choose_node(nodes: list[tuple[Path, int]]) -> Path | None:
     return nodes[0][0]
 
 
+def candidate_order(nodes: list[tuple[Path, int]]) -> list[Path]:
+    """Every node worth trying, best first.
+
+    Upstream's interface number does not survive contact with real hardware --
+    an AceMagic S1 publishes interfaces 0 and 2 -- so rather than guess, try
+    the preferred interface first and then everything else. Whichever accepts
+    a full frame is the display, and that is a fact about the device rather
+    than an assumption about it.
+    """
+    preferred = choose_node(nodes)
+    ordered = [preferred] if preferred is not None else []
+    ordered += [path for path, _ in nodes if path != preferred]
+    return ordered
+
+
 # -- Writing ----------------------------------------------------------------
 
 
-def send(target: Path, packets: list[bytes]) -> int:
-    """Write every packet to ``target``. Returns a process exit status.
+def send(target: Path, packets: list[bytes], init_delay: float = DEFAULT_INIT_DELAY) -> str | None:
+    """Write every packet to ``target``.
+
+    Returns ``None`` on success, or a description of what went wrong. A string
+    rather than an exit status because the caller may try another node.
 
     A short write means the report was rejected, which would leave the panel
-    holding a truncated frame -- worth failing loudly rather than continuing
-    and blaming the picture.
+    holding a truncated frame -- worth reporting rather than continuing and
+    blaming the picture.
     """
     try:
         fd = os.open(target, os.O_WRONLY)
     except OSError as exc:
-        print(f"could not open {target}: {exc}", file=sys.stderr)
-        return 1
+        return f"could not open {target}: {exc}"
 
+    index = 0
     try:
+        # Anything written before the panel has initialised is accepted by the
+        # kernel and ignored by the device, or times out waiting for a reply.
+        if init_delay > 0:
+            time.sleep(init_delay)
+
         for index, packet in enumerate(packets):
             written = os.write(fd, packet)
             if written != len(packet):
-                print(f"short write on packet {index}: {written} bytes", file=sys.stderr)
-                return 1
+                return f"short write on packet {index}: {written} of {len(packet)} bytes"
     except OSError as exc:
-        print(f"write failed: {exc}", file=sys.stderr)
-        return 1
+        return f"write failed on packet {index}: {exc}"
     finally:
         os.close(fd)
 
-    return 0
+    return None
 
 
 # -- Entry point ------------------------------------------------------------
@@ -240,7 +271,21 @@ def main() -> int:
         default="bars",
         help="What to draw (default: bars).",
     )
-    parser.add_argument("--node", default=None, help="Write to this /dev/hidrawN node.")
+    parser.add_argument(
+        "--node",
+        default=None,
+        help="Write to this /dev/hidrawN node instead of trying each in turn.",
+    )
+    parser.add_argument(
+        "--init-delay",
+        type=float,
+        default=DEFAULT_INIT_DELAY,
+        help=(
+            f"Seconds to wait after opening before writing (default: "
+            f"{DEFAULT_INIT_DELAY}). The panel ignores anything sent before it "
+            "has initialised."
+        ),
+    )
     parser.add_argument(
         "--dry-run",
         action="store_true",
@@ -254,34 +299,44 @@ def main() -> int:
         marker = " <- display" if interface == LCD_INTERFACE else ""
         print(f"  {path} if{interface}{marker}")
 
-    if args.node is not None:
-        target = Path(args.node)
-    else:
-        target = choose_node(nodes)
-        if target is None and not args.dry_run:
-            print("no HT32 panel found on this machine", file=sys.stderr)
-            print(
-                "check that the panel is attached, that this container was given "
-                "the device nodes, and that you can read /dev/hidraw*",
-                file=sys.stderr,
-            )
-            return 1
+    targets = [Path(args.node)] if args.node is not None else candidate_order(nodes)
 
     print(f"building a {args.pattern} frame ({FRAME_BYTES} bytes)")
     packets = build_packets(build_frame(args.pattern))
     print(f"{len(packets)} packets of {PACKET_SIZE} bytes")
 
     if args.dry_run:
-        print("dry run: nothing written")
+        print(f"dry run: would try {', '.join(str(path) for path in targets) or '(nothing)'}")
         return 0
 
-    if target is None:
+    if not targets:
         print("no HT32 panel found on this machine", file=sys.stderr)
+        print(
+            "check that the panel is attached, that this container was given "
+            "the device nodes, and that you can read /dev/hidraw*",
+            file=sys.stderr,
+        )
         return 1
 
-    status = send(target, packets)
-    if status != 0:
-        return status
+    target = None
+    for candidate in targets:
+        print(f"trying {candidate} (waiting {args.init_delay}s for the panel to wake)")
+        problem = send(candidate, packets, args.init_delay)
+        if problem is None:
+            target = candidate
+            break
+        print(f"  {problem}")
+
+    if target is None:
+        print("", file=sys.stderr)
+        print("no node accepted the frame", file=sys.stderr)
+        print(
+            "ETIMEDOUT on every node usually means the packet framing is wrong "
+            "rather than the device being absent -- the panel is there, it just "
+            "did not answer.",
+            file=sys.stderr,
+        )
+        return 1
 
     print(f"wrote {len(packets)} packets to {target}")
     if args.pattern == "bars":

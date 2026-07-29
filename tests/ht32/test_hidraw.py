@@ -18,6 +18,7 @@ import pytest
 
 from tinydisplay.ht32 import DeviceNotFoundError, TransportError
 from tinydisplay.ht32.hidraw import (
+    DEFAULT_INIT_DELAY,
     UNKNOWN_INTERFACE,
     HidrawDeviceInfo,
     HidrawTransport,
@@ -31,6 +32,10 @@ from tinydisplay.ht32.protocol import LCD_INTERFACE, PACKET_SIZE, PRODUCT_ID, VE
 from tinydisplay.ht32.transport import HidTransport, PanelTransport, create_panel_transport
 
 PANEL_HID_ID = "HID_ID=0003:000004D9:0000FD01"
+
+# The real transport waits a second after opening for the panel to wake. These
+# tests open temporary files, which are awake already.
+NO_DELAY = 0.0
 
 
 def make_node(
@@ -167,7 +172,7 @@ class TestDeviceInfo:
 
 class TestTransport:
     def test_satisfies_the_panel_transport_protocol(self) -> None:
-        assert isinstance(HidrawTransport(path="/dev/null"), PanelTransport)
+        assert isinstance(HidrawTransport(path="/dev/null", init_delay=NO_DELAY), PanelTransport)
 
     def test_writes_land_in_the_node_verbatim(self, tmp_path: Path) -> None:
         # A regular file is indistinguishable from a device node here, which
@@ -176,7 +181,7 @@ class TestTransport:
         node.touch()
         packet = bytes(range(256)) * (PACKET_SIZE // 256) + bytes(PACKET_SIZE % 256)
 
-        transport = HidrawTransport(path=node)
+        transport = HidrawTransport(path=node, init_delay=NO_DELAY)
         transport.open()
         transport.write(packet)
         transport.close()
@@ -186,7 +191,7 @@ class TestTransport:
     def test_open_is_idempotent(self, tmp_path: Path) -> None:
         node = tmp_path / "hidraw1"
         node.touch()
-        transport = HidrawTransport(path=node)
+        transport = HidrawTransport(path=node, init_delay=NO_DELAY)
         transport.open()
         assert transport.is_open
         transport.open()
@@ -195,12 +200,12 @@ class TestTransport:
 
     def test_writing_while_closed_fails(self) -> None:
         with pytest.raises(TransportError, match="not open"):
-            HidrawTransport(path="/dev/null").write(bytes(PACKET_SIZE))
+            HidrawTransport(path="/dev/null", init_delay=NO_DELAY).write(bytes(PACKET_SIZE))
 
     def test_a_wrong_sized_packet_is_refused(self, tmp_path: Path) -> None:
         node = tmp_path / "hidraw1"
         node.touch()
-        transport = HidrawTransport(path=node)
+        transport = HidrawTransport(path=node, init_delay=NO_DELAY)
         transport.open()
         try:
             with pytest.raises(TransportError, match=f"{PACKET_SIZE} bytes"):
@@ -210,17 +215,23 @@ class TestTransport:
 
     def test_opening_a_missing_node_reports_it(self, tmp_path: Path) -> None:
         with pytest.raises(DeviceNotFoundError):
-            HidrawTransport(path=tmp_path / "absent").open()
+            HidrawTransport(path=tmp_path / "absent", init_delay=NO_DELAY).open()
+
+    def test_the_init_delay_defaults_to_the_documented_wait(self) -> None:
+        # Writing before the panel has woken produces ETIMEDOUT, which reads
+        # like a protocol fault. Regressing this default would be expensive to
+        # diagnose, so it is pinned.
+        assert DEFAULT_INIT_DELAY == 1.0
 
     def test_closing_an_unopened_transport_is_safe(self) -> None:
-        transport = HidrawTransport(path="/dev/null")
+        transport = HidrawTransport(path="/dev/null", init_delay=NO_DELAY)
         transport.close()
         assert not transport.is_open
 
     def test_close_releases_the_descriptor(self, tmp_path: Path) -> None:
         node = tmp_path / "hidraw1"
         node.touch()
-        transport = HidrawTransport(path=node)
+        transport = HidrawTransport(path=node, init_delay=NO_DELAY)
         transport.open()
         fd = transport._fd
         transport.close()

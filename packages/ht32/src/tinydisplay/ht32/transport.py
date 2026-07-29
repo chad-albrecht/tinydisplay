@@ -26,7 +26,14 @@ from typing import TYPE_CHECKING, Any, Final, NoReturn, Protocol, runtime_checka
 
 from tinydisplay.ht32.device import HT32DeviceInfo, find_panel, import_hid
 from tinydisplay.ht32.errors import DeviceNotFoundError, TransportError
-from tinydisplay.ht32.hidraw import HidrawTransport, enumerate_hidraw, is_hidraw_available
+from tinydisplay.ht32.hidraw import (
+    DEFAULT_INIT_DELAY as HIDRAW_INIT_DELAY,
+)
+from tinydisplay.ht32.hidraw import (
+    HidrawTransport,
+    enumerate_hidraw,
+    is_hidraw_available,
+)
 from tinydisplay.ht32.protocol import PACKET_SIZE, PRODUCT_ID, VENDOR_ID
 
 if TYPE_CHECKING:
@@ -43,8 +50,11 @@ __all__ = [
 
 #: The panel enumerates before it is ready to be spoken to. Upstream waits a
 #: full second after opening the device and before the first command; frames
-#: written inside that window are silently dropped.
-DEFAULT_INIT_DELAY: Final = 1.0
+#: written inside that window are dropped, or time out waiting for a reply.
+#:
+#: Defined in :mod:`tinydisplay.ht32.hidraw` and re-exported here so both
+#: transports cannot disagree about it.
+DEFAULT_INIT_DELAY: Final = HIDRAW_INIT_DELAY
 
 
 @runtime_checkable

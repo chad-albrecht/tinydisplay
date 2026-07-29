@@ -29,6 +29,7 @@ from __future__ import annotations
 import contextlib
 import os
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Final
@@ -57,6 +58,10 @@ _HID_ID_PREFIX: Final = "HID_ID="
 
 #: Reported when the interface number cannot be determined.
 UNKNOWN_INTERFACE: Final = -1
+
+#: Seconds to wait after opening before the panel will answer. Upstream waits
+#: this long and so must we: writes issued sooner time out.
+DEFAULT_INIT_DELAY: Final = 1.0
 
 #: Binary mode. A no-op on Linux, where this transport actually runs, but
 #: without it Windows translates 0x0A in a packet into 0x0D 0x0A and corrupts
@@ -250,6 +255,7 @@ class HidrawTransport:
         *,
         path: Path | str | None = None,
         device: HidrawDeviceInfo | None = None,
+        init_delay: float = DEFAULT_INIT_DELAY,
     ) -> None:
         if device is not None:
             self._path: Path | None = device.path
@@ -258,6 +264,7 @@ class HidrawTransport:
         else:
             self._path = None
         self._device = device
+        self._init_delay = init_delay
         self._fd: int | None = None
 
     @property
@@ -294,6 +301,13 @@ class HidrawTransport:
             raise DeviceNotFoundError(msg) from exc
 
         self._path = Path(path)
+
+        # The panel enumerates before it can be spoken to. A frame written
+        # inside that window draws nothing and surfaces as ETIMEDOUT, which
+        # reads like a protocol fault rather than a timing one -- so this delay
+        # costs a second and saves an afternoon.
+        if self._init_delay > 0:
+            time.sleep(self._init_delay)
 
     def write(self, packet: bytes) -> None:
         """Write one packet.

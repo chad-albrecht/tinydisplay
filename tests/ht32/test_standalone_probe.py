@@ -22,6 +22,7 @@ import pytest
 
 from tinydisplay.core import Color
 from tinydisplay.ht32 import protocol
+from tinydisplay.ht32.hidraw import DEFAULT_INIT_DELAY
 
 if TYPE_CHECKING:
     from types import ModuleType
@@ -131,3 +132,24 @@ class TestNodeSelection:
 
     def test_nothing_selects_nothing(self, probe: ModuleType) -> None:
         assert probe.choose_node([]) is None
+
+    def test_every_node_is_a_candidate(self, probe: ModuleType) -> None:
+        # Upstream's interface number does not match real hardware -- an
+        # AceMagic S1 publishes interfaces 0 and 2, and no interface 1 -- so
+        # every node the panel owns must be tried rather than one guessed at.
+        nodes = [(Path("/dev/hidraw0"), 0), (Path("/dev/hidraw1"), 2)]
+        assert probe.candidate_order(nodes) == [Path("/dev/hidraw0"), Path("/dev/hidraw1")]
+
+    def test_the_preferred_interface_is_tried_first(self, probe: ModuleType) -> None:
+        nodes = [(Path("/dev/hidraw0"), 0), (Path("/dev/hidraw1"), protocol.LCD_INTERFACE)]
+        assert probe.candidate_order(nodes)[0] == Path("/dev/hidraw1")
+
+    def test_no_nodes_means_no_candidates(self, probe: ModuleType) -> None:
+        assert probe.candidate_order([]) == []
+
+
+class TestInitDelay:
+    def test_matches_the_package_default(self, probe: ModuleType) -> None:
+        # The standalone copy waiting a different amount than the driver would
+        # make a bring-up result meaningless.
+        assert probe.DEFAULT_INIT_DELAY == DEFAULT_INIT_DELAY
