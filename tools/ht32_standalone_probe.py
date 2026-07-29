@@ -298,11 +298,67 @@ def candidate_order(nodes: list[tuple[Path, int]]) -> list[Path]:
 # -- Writing ----------------------------------------------------------------
 
 
+HID_REPORT_BYTES = 64
+
+
+def frame_whole(packet: bytes) -> list[bytes]:
+    """One write of the full 4105-byte buffer, report ID included.
+
+    What every attempt so far has used. The kernel accepts it, and the panel
+    ignores it.
+    """
+    return [packet]
+
+
+def frame_without_report_id(packet: bytes) -> list[bytes]:
+    """One write of 4104 bytes, with the report-ID byte removed.
+
+    hidraw is documented to strip a leading zero report ID before the report
+    reaches the device. If it does not -- or if this device numbers its
+    reports differently than assumed -- then every packet we have sent arrived
+    with its signature one byte late, which the firmware would reject exactly
+    as quietly as we have observed.
+    """
+    return [packet[1:]]
+
+
+def frame_reports(packet: bytes) -> list[bytes]:
+    """The declared shape: 64-byte reports, each with a zero report ID.
+
+    The descriptor says this interface speaks 64 bytes at a time. A 4104-byte
+    write is not something it ever claimed to accept.
+    """
+    payload = packet[1:]
+    reports = []
+    for start in range(0, len(payload), HID_REPORT_BYTES):
+        chunk = payload[start : start + HID_REPORT_BYTES]
+        reports.append(bytes([0x00]) + chunk.ljust(HID_REPORT_BYTES, b"\x00"))
+    return reports
+
+
+def frame_reports_bare(packet: bytes) -> list[bytes]:
+    """64-byte reports with no report-ID byte at all."""
+    payload = packet[1:]
+    return [
+        payload[start : start + HID_REPORT_BYTES].ljust(HID_REPORT_BYTES, b"\x00")
+        for start in range(0, len(payload), HID_REPORT_BYTES)
+    ]
+
+
+FRAMINGS = {
+    "whole": frame_whole,
+    "no-report-id": frame_without_report_id,
+    "reports": frame_reports,
+    "reports-bare": frame_reports_bare,
+}
+
+
 def send(
     target: Path,
     packets: list[bytes],
     init_delay: float = DEFAULT_INIT_DELAY,
     chunk_delay: float = 0.0,
+    framing: str = "whole",
 ) -> str | None:
     """Write every packet to ``target``.
 
@@ -325,12 +381,14 @@ def send(
         if init_delay > 0:
             time.sleep(init_delay)
 
+        split = FRAMINGS[framing]
         for index, packet in enumerate(packets):
-            written = os.write(fd, packet)
-            if written != len(packet):
-                return f"short write on packet {index}: {written} of {len(packet)} bytes"
+            for report in split(packet):
+                written = os.write(fd, report)
+                if written != len(report):
+                    return f"short write on packet {index}: {written} of {len(report)} bytes"
             # The firmware is documented as wanting brief pauses between
-            # transmissions; writing 27 reports flat out may overrun it.
+            # transmissions; writing flat out may overrun it.
             if chunk_delay > 0:
                 time.sleep(chunk_delay)
     except OSError as exc:
@@ -418,6 +476,33 @@ def parse_report_descriptor(data: bytes) -> dict[str, list[tuple[int, int]]]:
     return reports
 
 
+def output_report_size(path: Path) -> int:
+    """The largest output report a node declares, or 0 if it declares none."""
+    sysfs = HIDRAW_ROOT / path.name / "device" / "report_descriptor"
+    try:
+        reports = parse_report_descriptor(sysfs.read_bytes())
+    except OSError:
+        return 0
+    return max((size for _, size in reports["output"]), default=0)
+
+
+def writable_node(nodes: list[tuple[Path, int]]) -> Path | None:
+    """The node that can actually receive a frame.
+
+    Picking by descriptor rather than by "the write returned success" is the
+    lesson of this bring-up: an input-only interface accepts writes and does
+    nothing with them, which looks like a protocol bug for as long as you let
+    it.
+    """
+    writable = [(path, output_report_size(path)) for path, _ in nodes]
+    writable = [(path, size) for path, size in writable if size > 0]
+    if not writable:
+        return None
+    # Prefer the biggest output report: if one interface can take a whole
+    # chunk and another only a few bytes, the big one is the display.
+    return max(writable, key=lambda entry: entry[1])[0]
+
+
 def describe_nodes() -> int:
     """Print what each hidraw node declares. Returns a process exit status."""
     nodes = find_nodes()
@@ -459,19 +544,22 @@ def describe_nodes() -> int:
 
 # -- Sweep ------------------------------------------------------------------
 
-# Each entry is (name, send_orientation, send_heartbeat, seq_first, chunk_delay)
-# paired with the colour it paints. Ordered cheapest-hypothesis first: the
-# leading suspicion is that the panel needs to be told it is host-driven before
-# it will accept a frame.
+# Each entry is (name, framing, send_init, seq_first, chunk_delay, colour).
+#
+# The command-sequence question is closed: all eight sequences were accepted and
+# none drew. The descriptor then showed why nothing could have worked -- this
+# interface declares 64-byte output reports, and every attempt so far has been a
+# single 4104-byte write. So these vary the *transport framing* instead, which is
+# the layer the evidence now points at.
 SWEEP = (
-    ("orientation + heartbeat", True, True, False, 0.002, "red"),
-    ("orientation only", True, False, False, 0.002, "green"),
-    ("heartbeat only", False, True, False, 0.002, "blue"),
-    ("no init, paced writes", False, False, False, 0.002, "yellow"),
-    ("orientation + heartbeat, seq/phase swapped", True, True, True, 0.002, "cyan"),
-    ("seq/phase swapped, no init", False, False, True, 0.002, "magenta"),
-    ("orientation + heartbeat, unpaced", True, True, False, 0.0, "orange"),
-    ("no init, unpaced (what already failed)", False, False, False, 0.0, "purple"),
+    ("64-byte reports, zero report id", "reports", True, False, 0.002, "red"),
+    ("64-byte reports, no report id", "reports-bare", True, False, 0.002, "green"),
+    ("one 4104-byte write, report id removed", "no-report-id", True, False, 0.002, "blue"),
+    ("64-byte reports, no init commands", "reports", False, False, 0.002, "yellow"),
+    ("64-byte reports, seq/phase swapped", "reports", True, True, 0.002, "cyan"),
+    ("64-byte reports, unpaced", "reports", True, False, 0.0, "magenta"),
+    ("4104-byte write, no init", "no-report-id", False, False, 0.002, "orange"),
+    ("one 4105-byte write (what already failed)", "whole", True, False, 0.002, "purple"),
 )
 
 
@@ -489,20 +577,17 @@ def sweep(target: Path, init_delay: float, settle: float) -> int:
     print("")
 
     accepted = []
-    for number, (name, orientation, heartbeat, seq_first, chunk_delay, colour) in enumerate(
-        SWEEP, start=1
-    ):
+    for number, (name, framing, init, seq_first, chunk_delay, colour) in enumerate(SWEEP, start=1):
         frame = build_frame(colour)
         packets = []
-        if orientation:
+        if init:
             packets.append(build_orientation())
-        if heartbeat:
             packets.append(build_heartbeat())
         builder = build_packet_seq_first if seq_first else build_packet
         packets += [builder(frame, index) for index in range(CHUNK_COUNT)]
 
         print(f"{number}. {colour:<8} {name}")
-        problem = send(target, packets, init_delay, chunk_delay)
+        problem = send(target, packets, init_delay, chunk_delay, framing)
         if problem is not None:
             print(f"     rejected: {problem}")
         else:
@@ -564,6 +649,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.002,
         help="Seconds between chunk writes (default: 0.002).",
+    )
+    parser.add_argument(
+        "--framing",
+        choices=sorted(FRAMINGS),
+        default="reports",
+        help=(
+            "How each packet reaches the device. 'reports' matches what the "
+            "interface declares -- 64-byte reports (default)."
+        ),
     )
     parser.add_argument(
         "--init",
@@ -635,13 +729,14 @@ def main() -> int:
         return 1
 
     if args.sweep:
-        # Sweeping needs a node that accepts writes; find one with the ordinary
-        # path first so a sweep is never run against the wrong interface.
-        for candidate in targets:
-            if send(candidate, packets, args.init_delay, args.chunk_delay) is None:
-                return sweep(candidate, args.init_delay, args.settle)
-        print("no node accepted a frame, so there is nothing to sweep", file=sys.stderr)
-        return 1
+        # Choose the node by what it declares, not by whether a write returned
+        # success: an input-only interface accepts writes and cannot possibly
+        # be the display, which is the trap that cost the last two rounds.
+        target = writable_node(nodes)
+        if target is None:
+            print("no interface declares an output report; nothing to sweep", file=sys.stderr)
+            return 1
+        return sweep(target, args.init_delay, args.settle)
 
     return run_once(args, targets, packets)
 
@@ -655,7 +750,7 @@ def run_once(
     target = None
     for candidate in targets:
         print(f"trying {candidate} (waiting {args.init_delay}s for the panel to wake)")
-        problem = send(candidate, packets, args.init_delay, args.chunk_delay)
+        problem = send(candidate, packets, args.init_delay, args.chunk_delay, args.framing)
         if problem is None:
             target = candidate
             break

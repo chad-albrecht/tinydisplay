@@ -214,9 +214,75 @@ class TestSweep:
         assert frame[0:2] == frame[2:4] == bytes([0xF8, 0x00])
 
     def test_the_leading_hypothesis_is_first(self, probe: ModuleType) -> None:
-        # Ordering is the point: the cheapest explanation should be tried
-        # before the exotic ones, so a success needs no further reading.
-        assert probe.SWEEP[0][0] == "orientation + heartbeat"
+        # Ordering is the point: the best-supported explanation goes first, so
+        # a success needs no further reading. The descriptor says this
+        # interface speaks 64-byte reports, so that is the one to try.
+        assert probe.SWEEP[0][1] == "reports"
+
+    def test_the_known_failure_is_last(self, probe: ModuleType) -> None:
+        # Keeping the already-disproved framing in the sweep is deliberate --
+        # it is the control -- but it must not be tried first.
+        assert probe.SWEEP[-1][1] == "whole"
+
+    def test_every_framing_is_real(self, probe: ModuleType) -> None:
+        for entry in probe.SWEEP:
+            assert entry[1] in probe.FRAMINGS
+
+
+class TestFramings:
+    """How a logical packet is split into HID writes.
+
+    The panel's interface declares 64-byte output reports, and every attempt
+    before this one sent a single 4104-byte write. These are the readings of
+    that mismatch worth offering to the hardware.
+    """
+
+    def test_whole_is_a_single_untouched_write(self, probe: ModuleType) -> None:
+        packet = probe.build_packet(bytes(protocol.FRAME_BYTES), 0)
+        assert probe.frame_whole(packet) == [packet]
+
+    def test_removing_the_report_id_drops_exactly_one_byte(self, probe: ModuleType) -> None:
+        packet = probe.build_packet(bytes(protocol.FRAME_BYTES), 0)
+        reports = probe.frame_without_report_id(packet)
+
+        assert len(reports) == 1
+        assert len(reports[0]) == protocol.PACKET_SIZE - 1
+        # The signature must land on the device's byte 0 either way.
+        assert reports[0][0] == probe.SIGNATURE
+
+    def test_reports_are_sixty_five_bytes_each(self, probe: ModuleType) -> None:
+        packet = probe.build_packet(bytes(protocol.FRAME_BYTES), 0)
+        reports = probe.frame_reports(packet)
+        assert {len(report) for report in reports} == {probe.HID_REPORT_BYTES + 1}
+
+    def test_bare_reports_are_sixty_four_bytes_each(self, probe: ModuleType) -> None:
+        packet = probe.build_packet(bytes(protocol.FRAME_BYTES), 0)
+        reports = probe.frame_reports_bare(packet)
+        assert {len(report) for report in reports} == {probe.HID_REPORT_BYTES}
+
+    def test_reports_carry_the_whole_packet(self, probe: ModuleType) -> None:
+        # Splitting must lose nothing: the payload has to survive reassembly,
+        # trailing padding aside.
+        frame = bytes((offset * 11) % 251 for offset in range(protocol.FRAME_BYTES))
+        packet = probe.build_packet(frame, 0)
+        rebuilt = b"".join(report[1:] for report in probe.frame_reports(packet))
+        assert rebuilt[: len(packet) - 1] == packet[1:]
+
+    def test_the_last_report_is_padded_not_truncated(self, probe: ModuleType) -> None:
+        # 4104 is not a multiple of 64, so the tail needs padding; a short
+        # final report would be a different-sized report than declared.
+        packet = probe.build_packet(bytes(protocol.FRAME_BYTES), 0)
+        reports = probe.frame_reports(packet)
+        payload = protocol.PACKET_SIZE - 1
+        assert len(reports) == -(-payload // probe.HID_REPORT_BYTES)
+
+    def test_every_framing_preserves_the_signature_position(self, probe: ModuleType) -> None:
+        packet = probe.build_packet(bytes(protocol.FRAME_BYTES), 0)
+        for name, split in probe.FRAMINGS.items():
+            first = split(packet)[0]
+            # Either the report ID is present and the signature follows it, or
+            # it is absent and the signature leads.
+            assert probe.SIGNATURE in (first[0], first[1]), name
 
 
 class TestReportDescriptorParsing:
