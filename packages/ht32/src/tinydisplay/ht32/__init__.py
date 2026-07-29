@@ -83,8 +83,11 @@ from tinydisplay.ht32.protocol import (
     RedrawPhase,
     SubCommand,
     build_config_packet,
+    build_heartbeat_packet,
+    build_orientation_packet,
     build_redraw_packet,
     build_refresh_packet,
+    device_payload,
     iter_redraw_packets,
 )
 from tinydisplay.ht32.transport import (
@@ -93,6 +96,13 @@ from tinydisplay.ht32.transport import (
     PanelTransport,
     RecordingHidTransport,
     create_panel_transport,
+)
+from tinydisplay.ht32.usbfs import (
+    UsbDeviceInfo,
+    UsbfsTransport,
+    find_usb_panel,
+    is_usbfs_available,
+    usb_interfaces,
 )
 
 __version__ = "0.1.0"
@@ -130,18 +140,26 @@ __all__ = [
     "SerialLedTransport",
     "SubCommand",
     "TransportError",
+    "UsbDeviceInfo",
+    "UsbfsTransport",
     "__version__",
     "build_config_packet",
+    "build_heartbeat_packet",
     "build_led_packet",
+    "build_orientation_packet",
     "build_redraw_packet",
     "build_refresh_packet",
     "create_panel_transport",
+    "device_payload",
     "enumerate_hidraw",
     "enumerate_panels",
     "find_hidraw_panel",
     "find_led_port",
     "find_panel",
+    "find_usb_panel",
     "is_hid_available",
     "is_hidraw_available",
+    "is_usbfs_available",
     "iter_redraw_packets",
+    "usb_interfaces",
 ]

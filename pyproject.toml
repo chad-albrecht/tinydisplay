@@ -108,6 +108,11 @@ docstring-code-format = true
 # ---------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.12"
+# Type-check as Linux regardless of where mypy runs. The HT32 driver reaches
+# raw USB through fcntl and usbfs, which typeshed gates behind sys.platform, so
+# checking on Windows would reject code that is correct on the only platform it
+# runs on. CI checks on Linux; this makes a developer's local run agree with it.
+platform = "linux"
 strict = true
 mypy_path = "packages/core/src:packages/ht32/src:packages/simulator/src"
 files = ["packages", "tests", "examples"]

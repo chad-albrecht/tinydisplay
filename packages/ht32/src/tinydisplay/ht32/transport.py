@@ -35,6 +35,7 @@ from tinydisplay.ht32.hidraw import (
     is_hidraw_available,
 )
 from tinydisplay.ht32.protocol import PACKET_SIZE, PRODUCT_ID, VENDOR_ID
+from tinydisplay.ht32.usbfs import UsbfsTransport, find_usb_panel, is_usbfs_available
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
@@ -312,26 +313,37 @@ class HidTransport:
 def create_panel_transport(
     *,
     serial_number: str | None = None,
-    prefer_hidraw: bool = True,
+    prefer_hidraw: bool = False,
 ) -> PanelTransport:
     """Build the best transport this machine can actually use.
 
-    Prefers Linux ``hidraw`` when a matching node is visible, because it needs
-    no compiled USB library -- which is precisely the situation on the
-    appliance-style machines this panel tends to be built into. Falls back to
-    hidapi everywhere else.
+    Prefers raw USB through usbfs, because it is the only path this panel
+    answers on. The HID interface declares 64-byte output reports, so a
+    4,104-byte frame chunk cannot travel the hidraw path however it is framed:
+    the kernel accepts the write and the device ignores it. Bring-up confirmed
+    this the hard way, and both independent implementations for this hardware
+    reach the same conclusion by using libusb.
+
+    Falls back to hidapi off Linux, where usbfs does not exist.
 
     Args:
         serial_number: Restrict hidapi discovery to a panel with this serial.
-            Ignored by the hidraw path, which identifies nodes by hardware ID.
-        prefer_hidraw: Set False to force hidapi even where hidraw would work.
+            Ignored by the raw-USB path, which identifies devices by hardware
+            ID.
+        prefer_hidraw: Use the kernel HID path instead. Present for
+            experimentation only -- it is not known to drive this panel.
 
     Note that this only *selects*; nothing is opened until the driver connects,
-    so a wrong guess surfaces as a connection error rather than a silent
-    fallback to a transport that cannot work.
+    so a wrong choice surfaces as a connection error rather than as a silently
+    useless transport.
     """
-    if prefer_hidraw and serial_number is None and is_hidraw_available() and enumerate_hidraw():
-        return HidrawTransport()
+    if prefer_hidraw:
+        if is_hidraw_available() and enumerate_hidraw():
+            return HidrawTransport()
+        return HidTransport(serial_number=serial_number)
+
+    if serial_number is None and is_usbfs_available() and find_usb_panel() is not None:
+        return UsbfsTransport()
 
     return HidTransport(serial_number=serial_number)
 

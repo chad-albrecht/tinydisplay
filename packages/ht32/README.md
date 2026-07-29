@@ -170,14 +170,20 @@ deliberately, and `tests/ht32/test_standalone_probe.py` asserts byte-for-byte
 that the copy still agrees with this package. See also
 [`deploy/hassio-addon/`](../../deploy/hassio-addon/).
 
-### Unverified against hardware
+### Verified against hardware
 
-Everything above is derived from source, not from a panel on a desk. The
-framing is asserted byte-for-byte by the unit tests, but **no packet in this
-package has yet been acknowledged by a real device.** The most likely place for
-it to be wrong is the offset field, since that is the one field whose meaning
-was inferred rather than read. It is written in exactly one place
-(`protocol.build_redraw_packet`) so bring-up can change it once.
+Confirmed on an AceMagic S1 running Home Assistant OS: colour bars rendered in
+the correct order, with red rendering as red. That single image validates the
+byte order, the 27-chunk framing and the header layout at once.
+
+Bring-up corrected three things that no document got right:
+
+- **`hidraw` does not work at all.** See below — this is the big one.
+- **The display is not interface 1.** Upstream hard-codes it; the S1 publishes
+  interfaces 0 and 2 and no interface 1. The transport now chooses by
+  capability, picking whichever interface publishes an OUT endpoint.
+- **Bytes 4-7 are ignored by the firmware.** The offset field this package
+  once carried a warning about never mattered.
 
 Run the integration tests with a panel attached:
 
@@ -187,13 +193,38 @@ uv run pytest -m hardware -v
 
 They are deselected in CI, and skip with a reason when nothing is plugged in.
 
+### Why raw USB and not hidraw
+
+The panel's HID interface declares **64-byte output reports**. `hidraw` applies
+HID report semantics, so a 4,104-byte frame chunk cannot travel that path
+however it is framed: the kernel accepts every write, and the device acts on
+none of them. That failure is completely silent — writes succeed, nothing
+draws — which is what made it expensive to find.
+
+Both independent implementations of this protocol reach the same conclusion.
+`node-hid` is explicitly configured with `setDriverType('libusb')`, and
+`s1display` links libusb directly. libusb detaches the kernel driver and writes
+to the interface's endpoint, where the host controller splits the transfer into
+64-byte USB packets by itself.
+
+`UsbfsTransport` does the same thing without libusb, because libusb is a
+wrapper over `usbfs` and usbfs is a device node plus a few ioctls. That keeps
+the driver installable on the appliances this panel is built into, which have
+no compiler and no package manager. `HidrawTransport` is kept for
+experimentation and is not known to drive this panel.
+
+### The heartbeat is not optional
+
+The firmware expects a keep-alive roughly once a second. Without it, it paints
+*"Disconnection, content information display will not be allowed!"* over
+whatever is on screen — so a dashboard that draws once and stops sees its frame
+defaced a moment later, which looks like a rendering bug and is not one. Call
+`HT32Driver.heartbeat()` on a timer.
+
 ### Not implemented
 
 - **Brightness.** Upstream exposes no brightness or backlight command, and
   none is documented, so this package does not invent one.
-- **Orientation.** The `0xA1 / 0xF1` framing is known; the orientation codes
-  are not. `build_config_packet` takes a raw sub-command so bring-up can probe
-  them without patching the module.
 
 ## LED protocol
 

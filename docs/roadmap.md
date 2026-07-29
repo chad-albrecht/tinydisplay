@@ -37,9 +37,11 @@ is at fault.
 
 ## Phase 3 — HT32 driver ✅
 
-**`tinydisplay-ht32`.** Code complete, **not yet verified against hardware.**
-The first real device: 320x170, RGB565, USB HID (VID:PID `04D9:FD01`), with LED
-control over a CH340 serial link at 10000 baud.
+**`tinydisplay-ht32`.** Complete and **verified on hardware** — an AceMagic S1
+running Home Assistant OS, drawing colour bars in the correct order with red
+rendering as red, which validates byte order, framing and header layout at
+once. 320x170, RGB565, VID:PID `04D9:FD01`, with LED control over a CH340
+serial link at 10000 baud.
 
 - `protocol`: the wire format as pure functions, no I/O — 27 packets of 4,105
   bytes per frame, derived from the panel's geometry rather than hard-coded.
@@ -58,15 +60,25 @@ control over a CH340 serial link at 10000 baud.
 - Integration tests marked `hardware`, deselected in CI and skipped with a
   reason when no panel is attached.
 
-Two things are deliberately absent. **Brightness**: upstream exposes no such
-command and none is documented, so this package does not invent one.
-**Orientation**: the framing is known, the codes are not; `build_config_packet`
-takes a raw sub-command so bring-up can probe them.
+**Brightness** is deliberately absent: upstream exposes no such command and
+none is documented, so this package does not invent one.
 
-The protocol was reconstructed from upstream's Rust source, since no
-specification is published. The offset field is the one part whose *meaning*
-was inferred rather than read, and it is written in a single place so hardware
-bring-up can correct it once. See [the package README](../packages/ht32/README.md).
+Bring-up corrected three things no document got right, and the first is the
+reason this phase took a while:
+
+- **`hidraw` cannot drive this panel.** Its HID interface declares 64-byte
+  output reports, so a 4,104-byte chunk cannot travel that path however it is
+  framed — the kernel accepts every write and the device acts on none. The
+  failure is silent, which is what made it expensive. Both independent
+  implementations of this protocol use libusb for exactly this reason, and
+  `UsbfsTransport` does the same thing with no library at all.
+- **The display is not interface 1.** Upstream hard-codes it; the S1 has no
+  interface 1. Transports now choose by capability instead.
+- **The heartbeat is not optional.** Without one a second, the firmware paints
+  its own disconnection banner over the frame.
+
+See [the package README](../packages/ht32/README.md) for the reconstructed wire
+protocol and what each source got wrong.
 
 ## Phase 4 — Widget library
 

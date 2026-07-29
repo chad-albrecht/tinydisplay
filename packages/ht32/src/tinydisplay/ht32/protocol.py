@@ -39,6 +39,13 @@ frame is 108,800 bytes -- which does not fit -- but 54,400 pixels, which does.
 A byte offset would overflow at the twelfth chunk; a pixel offset tops out at
 53,248 and fits with room to spare. See :data:`CHUNK_PIXEL_OFFSETS`.
 
+Hardware bring-up later settled both questions and added a third. Independent
+documentation for this panel states that bytes 4 to 7 are *ignored by the
+firmware* outright, so the offset reading never mattered. And byte 0 is a HID
+report ID, which is a convention of the ``hidraw`` API rather than part of the
+protocol: the device's own byte 0 is the signature. Transports that do not go
+through hidraw must drop it -- see :func:`device_payload`.
+
 Example:
     >>> from tinydisplay.ht32.protocol import FRAME_BYTES, build_redraw_packet
     >>> packet = build_redraw_packet(bytes(FRAME_BYTES), 0)
@@ -63,6 +70,8 @@ __all__ = [
     "FINAL_CHUNK_SIZE",
     "FRAME_BYTES",
     "HEADER_SIZE",
+    "ORIENTATION_LANDSCAPE",
+    "ORIENTATION_PORTRAIT",
     "PACKET_SIZE",
     "PANEL_HEIGHT",
     "PANEL_PIXEL_FORMAT",
@@ -75,8 +84,11 @@ __all__ = [
     "RedrawPhase",
     "SubCommand",
     "build_config_packet",
+    "build_heartbeat_packet",
+    "build_orientation_packet",
     "build_redraw_packet",
     "build_refresh_packet",
+    "device_payload",
     "iter_redraw_packets",
 ]
 
@@ -146,6 +158,11 @@ class SubCommand(IntEnum):
 
     ORIENTATION = 0xF1
     SET_TIME = 0xF2
+
+
+#: Byte 4 of an orientation command. Confirmed against hardware.
+ORIENTATION_LANDSCAPE: Final = 0x01
+ORIENTATION_PORTRAIT: Final = 0x02
 
 
 class RedrawPhase(IntEnum):
@@ -277,6 +294,69 @@ def build_config_packet(sub_command: SubCommand | int, params: bytes = b"") -> b
     packet[3] = int(sub_command)
     packet[params_start : params_start + len(params)] = params
     return bytes(packet)
+
+
+def device_payload(packet: bytes) -> bytes:
+    """Strip the HID report-ID byte, leaving what the device actually receives.
+
+    ``hidraw`` and hidapi both take the report ID as the first byte of the
+    buffer and remove it before the report reaches the device. A transport that
+    talks to the USB endpoint directly does no such thing, so it must drop the
+    byte itself or the firmware sees its signature one position late and
+    silently discards the frame.
+
+    Example:
+        >>> from tinydisplay.ht32.protocol import SIGNATURE, build_refresh_packet
+        >>> from tinydisplay.ht32.protocol import device_payload
+        >>> payload = device_payload(build_refresh_packet())
+        >>> len(payload), payload[0] == SIGNATURE
+        (4104, True)
+    """
+    return packet[REPORT_SIZE:]
+
+
+def build_orientation_packet(*, landscape: bool = True) -> bytes:
+    """Tell the panel which way round its image should be.
+
+    Confirmed against hardware during bring-up.
+
+    Example:
+        >>> from tinydisplay.ht32.protocol import build_orientation_packet
+        >>> list(build_orientation_packet()[:5])
+        [0, 85, 161, 241, 1]
+    """
+    return build_config_packet(
+        SubCommand.ORIENTATION,
+        bytes([ORIENTATION_LANDSCAPE if landscape else ORIENTATION_PORTRAIT]),
+    )
+
+
+def build_heartbeat_packet(hour: int, minute: int, second: int) -> bytes:
+    """Build the keep-alive the panel expects roughly once a second.
+
+    The panel treats a missing heartbeat as the host having gone away, and
+    paints its own "Disconnection, content information display will not be
+    allowed!" banner over whatever was on screen. A driver that draws once and
+    stops therefore sees its frame defaced a moment later, which looks like a
+    rendering bug and is not one.
+
+    Raises:
+        ProtocolError: If any component is out of range.
+
+    Example:
+        >>> from tinydisplay.ht32.protocol import build_heartbeat_packet
+        >>> list(build_heartbeat_packet(14, 30, 5)[:7])
+        [0, 85, 161, 242, 14, 30, 5]
+    """
+    for name, value, limit in (
+        ("hour", hour, 23),
+        ("minute", minute, 59),
+        ("second", second, 60),
+    ):
+        if not 0 <= value <= limit:
+            msg = f"{name} must be between 0 and {limit}, got {value}"
+            raise ProtocolError(msg)
+    return build_config_packet(SubCommand.SET_TIME, bytes([hour, minute, second]))
 
 
 def build_refresh_packet() -> bytes:

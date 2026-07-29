@@ -27,6 +27,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import TYPE_CHECKING, Final
 
 from tinydisplay.core import DisplayDriver
@@ -36,6 +37,8 @@ from tinydisplay.ht32.protocol import (
     PANEL_HEIGHT,
     PANEL_PIXEL_FORMAT,
     PANEL_WIDTH,
+    build_heartbeat_packet,
+    build_orientation_packet,
     build_refresh_packet,
     iter_redraw_packets,
 )
@@ -108,6 +111,7 @@ class HT32Driver(DisplayDriver):
         self._frame_count = 0
         self._reconnect_count = 0
         self._failure_count = 0
+        self._heartbeat_count = 0
 
     # -- Introspection -----------------------------------------------------
 
@@ -130,6 +134,11 @@ class HT32Driver(DisplayDriver):
     def failure_count(self) -> int:
         """How many individual write attempts have failed, retries included."""
         return self._failure_count
+
+    @property
+    def heartbeat_count(self) -> int:
+        """How many keep-alives have been sent since construction."""
+        return self._heartbeat_count
 
     @property
     def auto_reconnect(self) -> bool:
@@ -171,6 +180,38 @@ class HT32Driver(DisplayDriver):
         self._frame_count += 1
 
     # -- Panel commands ----------------------------------------------------
+
+    async def heartbeat(self, when: time.struct_time | None = None) -> None:
+        """Tell the panel the host is still here.
+
+        The firmware expects this roughly once a second. Without it, it paints
+        "Disconnection, content information display will not be allowed!" over
+        whatever is on screen -- so a dashboard that draws once and stops sees
+        its frame defaced a moment later, which looks like a rendering bug and
+        is not one.
+
+        Args:
+            when: The clock to send. Defaults to now.
+
+        Raises:
+            DriverNotConnectedError: If the driver is not connected.
+            TransportError: If the command could not be written.
+        """
+        self._require_connected()
+        now = when or time.localtime()
+        packet = build_heartbeat_packet(now.tm_hour, now.tm_min, min(now.tm_sec, 59))
+        await self._write_frame((packet,))
+        self._heartbeat_count += 1
+
+    async def set_orientation(self, *, landscape: bool = True) -> None:
+        """Set which way round the panel draws.
+
+        Raises:
+            DriverNotConnectedError: If the driver is not connected.
+            TransportError: If the command could not be written.
+        """
+        self._require_connected()
+        await self._write_frame((build_orientation_packet(landscape=landscape),))
 
     async def refresh(self) -> None:
         """Ask the panel to repaint the frame it already holds.
