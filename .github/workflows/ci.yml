@@ -15,12 +15,16 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
+          # uv.lock is deliberately not committed (this is a library workspace,
+          # so downstream resolution should stay free). Key the cache off the
+          # pyproject files instead, or it would never invalidate.
+          cache-dependency-glob: "**/pyproject.toml"
 
       - name: Install the workspace
         run: uv sync --python 3.12
@@ -35,12 +39,16 @@ jobs:
     name: Type check
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
+          # uv.lock is deliberately not committed (this is a library workspace,
+          # so downstream resolution should stay free). Key the cache off the
+          # pyproject files instead, or it would never invalidate.
+          cache-dependency-glob: "**/pyproject.toml"
 
       - name: Install the workspace
         run: uv sync --python 3.12
@@ -57,12 +65,16 @@ jobs:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ["3.12", "3.13"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
+          # uv.lock is deliberately not committed (this is a library workspace,
+          # so downstream resolution should stay free). Key the cache off the
+          # pyproject files instead, or it would never invalidate.
+          cache-dependency-glob: "**/pyproject.toml"
 
       - name: Install the workspace
         run: uv sync --python ${{ matrix.python-version }}
@@ -72,7 +84,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.xml
@@ -82,12 +94,16 @@ jobs:
     name: Build distributions
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v9
         with:
           enable-cache: true
+          # uv.lock is deliberately not committed (this is a library workspace,
+          # so downstream resolution should stay free). Key the cache off the
+          # pyproject files instead, or it would never invalidate.
+          cache-dependency-glob: "**/pyproject.toml"
 
       - name: Build tinydisplay-core
         run: uv build --package tinydisplay-core --out-dir dist
@@ -96,7 +112,7 @@ jobs:
         run: uvx twine check dist/*
 
       - name: Upload distributions
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/*
