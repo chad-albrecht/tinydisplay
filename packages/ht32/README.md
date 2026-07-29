@@ -218,8 +218,29 @@ experimentation and is not known to drive this panel.
 The firmware expects a keep-alive roughly once a second. Without it, it paints
 *"Disconnection, content information display will not be allowed!"* over
 whatever is on screen — so a dashboard that draws once and stops sees its frame
-defaced a moment later, which looks like a rendering bug and is not one. Call
-`HT32Driver.heartbeat()` on a timer.
+defaced a moment later, which looks like a rendering bug and is not one.
+
+`run_panel()` handles it. The packet is `55 A1 F2 hh mm ss`, matching the
+working reference implementation byte for byte, and the first one is sent
+**before** the first frame rather than an interval later: the panel starts
+every session already showing the banner, so the first keep-alive is what
+clears it, not what maintains it.
+
+**Partly open.** The banner has been seen on hardware during a run that was
+sending keep-alives on a timer, with the first one scheduled an interval in
+rather than sent immediately. Sending it up front is the fix for the startup
+gap and for a watchdog that looks to be about a second long, but it has not yet
+been confirmed on hardware that the banner stays away for a long run. If it
+reappears, the knobs to try are a shorter interval and
+`build_config_packet(0xF3, ...)` — documentation for this panel mentions
+`0xA1 0xF2/0xF3` together without saying what the second one is for.
+
+Verify either way with no install:
+
+```bash
+python3 tools/ht32_standalone_probe.py --loop 30                 # expect no banner
+python3 tools/ht32_standalone_probe.py --loop 30 --no-heartbeat  # expect the banner
+```
 
 ### Not implemented
 

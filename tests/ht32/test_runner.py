@@ -134,6 +134,23 @@ class TestOrientation:
 
 
 class TestHeartbeat:
+    async def test_the_first_one_goes_out_immediately(self) -> None:
+        # The panel starts every session showing its disconnection banner, so
+        # waiting a full interval leaves it up for that interval and races a
+        # watchdog that looks to be about a second long. A one-second interval
+        # here would fail if the first beat were scheduled rather than sent.
+        driver, _ = make_driver()
+        await run_panel(driver, paint, fps=FAST, max_frames=1, heartbeat_interval=1.0)
+        assert driver.heartbeat_count >= 1
+
+    async def test_it_precedes_the_orientation_and_the_frame(self) -> None:
+        driver, transport = make_driver()
+        await run_panel(driver, paint, fps=FAST, max_frames=1, heartbeat_interval=1.0)
+
+        first = transport.packets[0]
+        assert first[2] == Command.CONFIG
+        assert first[3] == SubCommand.SET_TIME
+
     async def test_keep_alives_are_sent(self) -> None:
         driver, _ = make_driver()
         await run_panel(driver, paint, fps=FAST, heartbeat_interval=TINY, max_frames=5)

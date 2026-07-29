@@ -95,6 +95,14 @@ async def run_panel(
     last_error: str | None = None
 
     async with driver:
+        # Heartbeat first, before anything else. The panel starts every session
+        # already believing the host is gone -- that is what its disconnection
+        # banner is -- so the first keep-alive is not a keep-alive at all, it is
+        # the introduction. Scheduling the first one an interval away instead
+        # leaves the banner up for that whole interval, and races a watchdog
+        # that appears to be about a second long.
+        if heartbeat_interval is not None:
+            await driver.heartbeat()
         await driver.set_orientation(landscape=landscape)
 
         loop = asyncio.get_running_loop()

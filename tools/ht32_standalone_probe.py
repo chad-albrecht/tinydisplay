@@ -961,6 +961,11 @@ def run_heartbeat_loop(
     try:
         if init_delay > 0:
             time.sleep(init_delay)
+        # Heartbeat before anything else: the panel starts each session already
+        # showing its disconnection banner, so the first keep-alive is what
+        # clears it rather than what maintains it.
+        if heartbeat_interval is not None:
+            device.write(device_payload_of(build_heartbeat()))
         device.write(device_payload_of(build_orientation()))
         drawn, beats = _drive(
             device,
