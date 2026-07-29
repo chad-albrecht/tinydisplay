@@ -90,6 +90,11 @@ from tinydisplay.ht32.protocol import (
     device_payload,
     iter_redraw_packets,
 )
+from tinydisplay.ht32.runner import (
+    DEFAULT_FPS,
+    DEFAULT_HEARTBEAT_INTERVAL,
+    run_panel,
+)
 from tinydisplay.ht32.transport import (
     DEFAULT_INIT_DELAY,
     HidTransport,
@@ -110,6 +115,8 @@ __version__ = "0.1.0"
 __all__ = [
     "CHUNK_COUNT",
     "DEFAULT_BAUD_RATE",
+    "DEFAULT_FPS",
+    "DEFAULT_HEARTBEAT_INTERVAL",
     "DEFAULT_INIT_DELAY",
     "DEFAULT_RECONNECT_ATTEMPTS",
     "DEFAULT_RECONNECT_DELAY",
@@ -161,5 +168,6 @@ __all__ = [
     "is_hidraw_available",
     "is_usbfs_available",
     "iter_redraw_packets",
+    "run_panel",
     "usb_interfaces",
 ]

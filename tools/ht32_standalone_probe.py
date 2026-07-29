@@ -757,8 +757,8 @@ class UsbfsDevice:
         self._fd = None
 
 
-def send_usbfs(packets: list[bytes], init_delay: float, chunk_delay: float) -> str | None:
-    """Write every packet over usbfs. Returns None on success, else a reason."""
+def open_usbfs() -> UsbfsDevice | str:
+    """Locate, open and claim the panel. Returns the device or a reason."""
     located = find_usb_device()
     if located is None:
         return "panel not found on the USB bus"
@@ -774,6 +774,14 @@ def send_usbfs(packets: list[bytes], init_delay: float, chunk_delay: float) -> s
         device.open()
     except OSError as exc:
         return f"could not claim interface {interface}: {exc}"
+    return device
+
+
+def send_usbfs(packets: list[bytes], init_delay: float, chunk_delay: float) -> str | None:
+    """Write every packet over usbfs. Returns None on success, else a reason."""
+    device = open_usbfs()
+    if isinstance(device, str):
+        return device
 
     try:
         if init_delay > 0:
@@ -840,6 +848,146 @@ def describe_usb() -> int:
     print(f"frames should go to interface {interface}, endpoint 0x{endpoint:02x}")
     print("run with --transport usbfs to try exactly that")
     return 0
+
+
+# -- Heartbeat loop ---------------------------------------------------------
+
+
+def build_sweep_frame(position: int, steps: int) -> bytes:
+    """A dark frame with a bright bar at ``position`` of ``steps``.
+
+    Frames are built by row rather than by pixel: in pure Python a per-pixel
+    loop over 54,400 pixels takes long enough to distort the frame rate this is
+    meant to be measuring.
+    """
+    dark = rgb565(10, 20, 35)
+    bright = rgb565(0, 180, 216)
+    dark_row = bytes([(dark >> 8) & 0xFF, dark & 0xFF]) * PANEL_WIDTH
+
+    bar_width = max(8, PANEL_WIDTH // steps)
+    start = (position * (PANEL_WIDTH - bar_width)) // max(1, steps - 1)
+    row = bytearray(dark_row)
+    for x in range(start, min(start + bar_width, PANEL_WIDTH)):
+        row[x * 2] = (bright >> 8) & 0xFF
+        row[x * 2 + 1] = bright & 0xFF
+
+    band_top, band_bottom = PANEL_HEIGHT // 3, 2 * PANEL_HEIGHT // 3
+    frame = bytearray()
+    for y in range(PANEL_HEIGHT):
+        frame += row if band_top <= y < band_bottom else dark_row
+    return bytes(frame)
+
+
+def _drive(
+    device: UsbfsDevice,
+    packets: list[list[bytes]],
+    *,
+    seconds: float,
+    fps: float,
+    heartbeat_interval: float | None,
+    chunk_delay: float,
+) -> tuple[int, int]:
+    """Send frames and keep-alives until the deadline. Returns the counts.
+
+    One loop drives both, exactly as the package's runner does: two writers
+    sharing an endpoint would interleave 27-packet frames and paint garbage.
+    """
+    frame_budget = 1.0 / fps
+    deadline = time.monotonic() + seconds
+    next_frame = time.monotonic()
+    next_beat = None if heartbeat_interval is None else time.monotonic() + heartbeat_interval
+    drawn = 0
+    beats = 0
+
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+
+        if next_beat is not None and now >= next_beat:
+            device.write(device_payload_of(build_heartbeat()))
+            beats += 1
+            next_beat = now + (heartbeat_interval or 0)
+            continue
+
+        if now >= next_frame:
+            for packet in packets[drawn % len(packets)]:
+                device.write(device_payload_of(packet))
+                if chunk_delay > 0:
+                    time.sleep(chunk_delay)
+            drawn += 1
+            next_frame = now + frame_budget
+            continue
+
+        # Wake for whichever deadline is nearest, so a slow frame rate cannot
+        # make keep-alives late.
+        wake = next_frame if next_beat is None else min(next_frame, next_beat)
+        time.sleep(max(0.0, min(wake, deadline) - time.monotonic()))
+
+    return (drawn, beats)
+
+
+def run_heartbeat_loop(
+    *,
+    seconds: float,
+    fps: float,
+    heartbeat_interval: float | None,
+    init_delay: float,
+    chunk_delay: float,
+) -> int:
+    """Drive the panel continuously, with or without keep-alives.
+
+    This is the experiment that settles what the heartbeat is for. Run it once
+    with keep-alives and once with ``--no-heartbeat``: if the firmware's
+    "Disconnection, content information display will not be allowed!" banner
+    appears only in the second run, the keep-alive is doing exactly what it is
+    believed to do.
+    """
+    device = open_usbfs()
+    if isinstance(device, str):
+        print(f"  {device}", file=sys.stderr)
+        return 1
+
+    steps = 16
+    frames = [build_sweep_frame(step, steps) for step in range(steps)]
+    packets = [build_packets(frame) for frame in frames]
+
+    print(f"driving the panel for {seconds:.0f}s at {fps}fps")
+    if heartbeat_interval is None:
+        print("keep-alives DISABLED -- expect the disconnection banner to appear")
+    else:
+        print(f"keep-alive every {heartbeat_interval}s -- expect a clean sweep throughout")
+    print("")
+
+    drawn = 0
+    try:
+        if init_delay > 0:
+            time.sleep(init_delay)
+        device.write(device_payload_of(build_orientation()))
+        drawn, beats = _drive(
+            device,
+            packets,
+            seconds=seconds,
+            fps=fps,
+            heartbeat_interval=heartbeat_interval,
+            chunk_delay=chunk_delay,
+        )
+    except OSError as exc:
+        print(f"transfer failed after {drawn} frames: {exc}", file=sys.stderr)
+        return 1
+    finally:
+        device.close()
+
+    print(f"drew {drawn} frames, sent {beats} keep-alives")
+    print("")
+    if heartbeat_interval is None:
+        print("Did the disconnection banner appear? If so, the keep-alive is required.")
+    else:
+        print("Did the sweep stay clean, with no banner? If so, the keep-alive works.")
+    return 0
+
+
+def device_payload_of(packet: bytes) -> bytes:
+    """Drop the HID report-ID byte, which the USB endpoint must not see."""
+    return packet[1:]
 
 
 # -- Sweep ------------------------------------------------------------------
@@ -939,6 +1087,27 @@ def build_parser() -> argparse.ArgumentParser:
         help="Print the panel's USB interfaces and endpoints, and exit.",
     )
     parser.add_argument(
+        "--loop",
+        type=float,
+        default=None,
+        metavar="SECONDS",
+        help=(
+            "Drive the panel continuously for this long, sending keep-alives. "
+            "Pair with --no-heartbeat to see what they are for."
+        ),
+    )
+    parser.add_argument(
+        "--no-heartbeat",
+        action="store_true",
+        help="During --loop, send no keep-alives. The panel should complain.",
+    )
+    parser.add_argument(
+        "--heartbeat-interval",
+        type=float,
+        default=1.0,
+        help="Seconds between keep-alives during --loop (default: 1.0).",
+    )
+    parser.add_argument(
         "--descriptors",
         action="store_true",
         help=(
@@ -959,6 +1128,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=2.0,
         help="Seconds to leave each sweep colour on screen (default: 2.0).",
+    )
+    parser.add_argument(
+        "--fps",
+        type=float,
+        default=2.0,
+        help="Frame rate during --loop (default: 2.0).",
     )
     parser.add_argument(
         "--chunk-delay",
@@ -1007,12 +1182,20 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def diagnostics_only(args: argparse.Namespace) -> int | None:
-    """Run a read-only diagnostic if one was asked for, else return None."""
+def early_commands(args: argparse.Namespace) -> int | None:
+    """Handle the modes that do not send a single frame, else return None."""
     if args.usb:
         return describe_usb()
     if args.descriptors:
         return describe_nodes()
+    if args.loop is not None:
+        return run_heartbeat_loop(
+            seconds=args.loop,
+            fps=args.fps,
+            heartbeat_interval=None if args.no_heartbeat else args.heartbeat_interval,
+            init_delay=args.init_delay,
+            chunk_delay=args.chunk_delay,
+        )
     return None
 
 
@@ -1025,9 +1208,9 @@ def main() -> int:
         marker = " <- display" if interface == LCD_INTERFACE else ""
         print(f"  {path} if{interface}{marker}")
 
-    diagnostic = diagnostics_only(args)
-    if diagnostic is not None:
-        return diagnostic
+    early = early_commands(args)
+    if early is not None:
+        return early
 
     targets = [Path(args.node)] if args.node is not None else candidate_order(nodes)
 
