@@ -1,0 +1,15 @@
+# Normalise all text to LF in the repository and in working copies.
+#
+# CI runs on Linux, macOS and Windows, and the `mixed-line-ending` pre-commit
+# hook enforces LF. Without this, Git would check files out as CRLF on Windows
+# and the hook would rewrite them on every commit.
+* text=auto eol=lf
+
+# Binary assets Git must never touch.
+*.png binary
+*.jpg binary
+*.ico binary
+*.ttf binary
+*.otf binary
+*.woff binary
+*.woff2 binary
