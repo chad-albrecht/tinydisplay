@@ -29,6 +29,9 @@ dependencies = [
     "numpy>=1.26",
 ]
 
+[project.scripts]
+tinydisplay-ht32 = "tinydisplay.ht32.__main__:main"
+
 [project.optional-dependencies]
 # The transports are optional so that the protocol layer -- which is pure
 # byte arithmetic, and the part most worth testing -- installs and runs

@@ -1,0 +1,51 @@
+# Home Assistant add-on manifest.
+#
+# This add-on exists to answer one question that cannot be answered from a
+# development machine: does the panel welded into this mini PC accept the
+# packets tinydisplay-ht32 produces? It is a diagnostic, not a service --
+# it runs once, prints what happened, and exits.
+name: TinyDisplay HT32 Bring-up
+version: "0.1.0"
+slug: tinydisplay_ht32
+description: >-
+  Probe the HT32 panel over USB HID and draw test patterns on it. For hardware
+  bring-up on machines with the panel built in, such as the AceMagic S1.
+url: https://github.com/chad-albrecht/tinydisplay
+
+# The panel is an x86 mini PC's built-in display. Nothing here is
+# architecture-specific, but there is no point building images nobody can run.
+arch:
+  - amd64
+
+# Runs to completion rather than staying up, so Home Assistant should not try
+# to start it on boot or restart it when it exits.
+startup: application
+boot: manual
+init: false
+
+# USB HID access. `usb` and `udev` map the bus and its device nodes; hidraw
+# nodes are root-owned, which is why full access is needed as well.
+#
+# full_access requires Protection Mode to be OFF for this add-on. That is a
+# real reduction in isolation, and the honest justification is that talking to
+# raw USB devices is the entire purpose here. Turn the add-on off when the
+# bring-up is finished.
+usb: true
+udev: true
+full_access: true
+
+options:
+  command: probe
+  pattern: bars
+  theme: rainbow
+  intensity: 3
+  speed: 3
+  repeat: 1
+
+schema:
+  command: list(probe|frame|led)
+  pattern: list(bars|gradient|chunks|solid|black)
+  theme: list(rainbow|breathing|colors|off|auto)
+  intensity: int(1,5)
+  speed: int(1,5)
+  repeat: int(1,600)

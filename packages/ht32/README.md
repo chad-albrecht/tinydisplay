@@ -130,6 +130,33 @@ Two details look like bugs until you do the arithmetic:
   frame is 108,800 bytes, which does not fit, but 54,400 pixels, which does. A
   byte offset would overflow partway through every frame.
 
+### Bring-up
+
+A panel gives almost no feedback: a write the OS accepts says nothing about
+whether the packet was understood. The command line exists for that, and its
+subcommands escalate:
+
+```bash
+tinydisplay-ht32 probe --open              # what does the bus say?
+tinydisplay-ht32 frame --pattern bars      # what does the glass say?
+tinydisplay-ht32 led --theme rainbow
+```
+
+Every subcommand takes `--dry-run`, which swaps in a recorder and reports what
+would have been written.
+
+The patterns are chosen so failures look specific rather than merely wrong:
+
+| Pattern | Catches | How it fails |
+| --- | --- | --- |
+| `bars` | Byte order | The bar labelled `red` is not red. |
+| `gradient` | Row stride | The ramp shears diagonally. |
+| `chunks` | Framing | A band sits in the wrong place — and its index is the packet number. |
+| `black` | — | Blanks the panel when you are done. |
+
+On a machine running Home Assistant OS, where there is no shell to run any of
+this from, see [`deploy/hassio-addon/`](../../deploy/hassio-addon/).
+
 ### Unverified against hardware
 
 Everything above is derived from source, not from a panel on a desk. The

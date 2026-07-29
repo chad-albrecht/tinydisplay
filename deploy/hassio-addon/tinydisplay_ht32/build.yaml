@@ -1,0 +1,14 @@
+# Debian rather than the usual Alpine base, deliberately.
+#
+# Home Assistant OS is Alpine-based, and Alpine is musl. PyPI publishes
+# manylinux wheels for hidapi but not musllinux ones, so an Alpine base would
+# mean compiling a USB library from source inside the add-on build -- gcc,
+# headers, and a build that breaks whenever upstream changes. The Debian base
+# image gets a prebuilt wheel and takes seconds.
+build_from:
+  amd64: ghcr.io/home-assistant/amd64-base-debian:bookworm
+
+args:
+  # Which commit of tinydisplay to install. Pin this to a tag or SHA when you
+  # want a reproducible image; `main` is right while the driver is moving.
+  TINYDISPLAY_REF: main
