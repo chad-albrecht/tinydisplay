@@ -25,10 +25,20 @@ Exit status is 0 on success, 1 on a panel or write problem, 2 on bad usage.
 from __future__ import annotations
 
 import argparse
+import contextlib
+import ctypes
 import os
 import sys
 import time
 from pathlib import Path
+
+# Linux only, and this file must stay importable everywhere: the tests that
+# pin it to the driver run on Windows and macOS too, and a bring-up tool that
+# cannot be imported cannot be checked for drift.
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - exercised by not being Linux
+    fcntl = None  # type: ignore[assignment]
 
 VENDOR_ID = 0x04D9
 PRODUCT_ID = 0xFD01
@@ -542,6 +552,296 @@ def describe_nodes() -> int:
     return 0
 
 
+# -- Raw USB via usbfs ------------------------------------------------------
+#
+# The panel is not driven through hidraw. Both working implementations for this
+# hardware use libusb -- tjaworski's node-hid is explicitly configured with
+# setDriverType('libusb'), and rojkov's s1display depends on libusb directly.
+# That is not a stylistic choice: hidraw applies HID report semantics, and this
+# interface declares 64-byte reports, so a 4104-byte frame chunk cannot travel
+# that path however it is framed. libusb detaches the kernel driver and pushes
+# the whole transfer at the interrupt endpoint, where the host controller
+# splits it into 64-byte USB packets by itself.
+#
+# libusb is not installable on the machines this panel lives in, but it is not
+# needed: it is a wrapper over usbfs, and usbfs is a device node plus a handful
+# of ioctls. Everything below is standard library.
+
+# _IOC(dir, type, nr, size) as the kernel encodes it on x86 and arm.
+_IOC_NONE, _IOC_WRITE, _IOC_READ = 0, 1, 2
+
+
+def _ioc(direction: int, letter: str, number: int, size: int) -> int:
+    return (direction << 30) | (size << 16) | (ord(letter) << 8) | number
+
+
+class _BulkTransfer(ctypes.Structure):
+    _fields_ = (
+        ("ep", ctypes.c_uint),
+        ("len", ctypes.c_uint),
+        ("timeout", ctypes.c_uint),
+        ("data", ctypes.c_void_p),
+    )
+
+
+class _DevfsIoctl(ctypes.Structure):
+    _fields_ = (
+        ("ifno", ctypes.c_int),
+        ("ioctl_code", ctypes.c_int),
+        ("data", ctypes.c_void_p),
+    )
+
+
+USBDEVFS_CLAIMINTERFACE = _ioc(_IOC_READ, "U", 15, ctypes.sizeof(ctypes.c_uint))
+USBDEVFS_RELEASEINTERFACE = _ioc(_IOC_READ, "U", 16, ctypes.sizeof(ctypes.c_uint))
+USBDEVFS_BULK = _ioc(_IOC_READ | _IOC_WRITE, "U", 2, ctypes.sizeof(_BulkTransfer))
+USBDEVFS_IOCTL = _ioc(_IOC_READ | _IOC_WRITE, "U", 18, ctypes.sizeof(_DevfsIoctl))
+USBDEVFS_DISCONNECT = _ioc(_IOC_NONE, "U", 22, 0)
+
+USB_DEVICES = Path("/sys/bus/usb/devices")
+
+#: bmAttributes low bits: 2 is bulk, 3 is interrupt. Either can carry frames.
+_TRANSFER_BULK, _TRANSFER_INTERRUPT = 2, 3
+
+
+def find_usb_device() -> tuple[int, int, Path] | None:
+    """Locate the panel on the USB bus.
+
+    Returns ``(busnum, devnum, sysfs_path)``, read from sysfs rather than
+    guessed, or ``None`` when the panel is not attached.
+    """
+    if not USB_DEVICES.is_dir():
+        return None
+    for entry in sorted(USB_DEVICES.iterdir()):
+        try:
+            vendor = int(read_text(entry / "idVendor").strip() or "0", 16)
+            product = int(read_text(entry / "idProduct").strip() or "0", 16)
+        except ValueError:
+            continue
+        if (vendor, product) != (VENDOR_ID, PRODUCT_ID):
+            continue
+        try:
+            bus = int(read_text(entry / "busnum").strip())
+            device = int(read_text(entry / "devnum").strip())
+        except ValueError:
+            continue
+        return (bus, device, entry)
+    return None
+
+
+def usb_interfaces(sysfs: Path) -> list[dict[str, object]]:
+    """Describe every interface the panel publishes, with its endpoints.
+
+    This is what the hidraw view could not show: interfaces that are not HID
+    have no /dev/hidraw node at all, so they were invisible to every earlier
+    diagnostic while being the most likely home of the display.
+    """
+    interfaces = []
+    for entry in sorted(sysfs.iterdir()):
+        if not entry.is_dir() or not entry.name.startswith(f"{sysfs.name}:"):
+            continue
+        try:
+            number = int(read_text(entry / "bInterfaceNumber").strip(), 16)
+        except ValueError:
+            continue
+
+        endpoints = []
+        for ep_dir in sorted(entry.glob("ep_*")):
+            try:
+                address = int(read_text(ep_dir / "bEndpointAddress").strip(), 16)
+                attributes = int(read_text(ep_dir / "bmAttributes").strip(), 16)
+                packet_size = int(read_text(ep_dir / "wMaxPacketSize").strip(), 16)
+            except ValueError:
+                continue
+            endpoints.append(
+                {
+                    "address": address,
+                    "kind": attributes & 0x03,
+                    "packet_size": packet_size,
+                    "direction": "in" if address & 0x80 else "out",
+                }
+            )
+
+        driver = ""
+        driver_link = entry / "driver"
+        if driver_link.is_symlink():
+            driver = Path(driver_link.readlink()).name
+
+        interfaces.append(
+            {
+                "number": number,
+                "class": read_text(entry / "bInterfaceClass").strip(),
+                "driver": driver,
+                "endpoints": endpoints,
+            }
+        )
+    return interfaces
+
+
+def find_output_endpoint(interfaces: list[dict[str, object]]) -> tuple[int, int] | None:
+    """Pick the interface and endpoint that can carry frames.
+
+    Returns ``(interface_number, endpoint_address)``. Prefers an interrupt or
+    bulk OUT endpoint; among candidates, the largest packet size wins, since a
+    display endpoint moves more data than a keypad's.
+    """
+    best: tuple[int, int, int] | None = None
+    for interface in interfaces:
+        endpoints = interface["endpoints"]
+        assert isinstance(endpoints, list)
+        for endpoint in endpoints:
+            if endpoint["direction"] != "out":
+                continue
+            if endpoint["kind"] not in (_TRANSFER_BULK, _TRANSFER_INTERRUPT):
+                continue
+            size = int(endpoint["packet_size"])
+            if best is None or size > best[2]:
+                best = (int(interface["number"]), int(endpoint["address"]), size)
+    if best is None:
+        return None
+    return (best[0], best[1])
+
+
+class UsbfsDevice:
+    """A panel opened through usbfs, the way libusb would open it."""
+
+    def __init__(self, bus: int, device: int, interface: int, endpoint: int) -> None:
+        self.path = Path(f"/dev/bus/usb/{bus:03d}/{device:03d}")
+        self.interface = interface
+        self.endpoint = endpoint
+        self._fd: int | None = None
+
+    def open(self) -> None:
+        """Open the device node, detach the kernel driver and claim the interface.
+
+        Detaching is the step hidraw cannot offer. While usbhid owns the
+        interface, every transfer is subject to HID report rules; once it is
+        detached, the endpoint takes whatever we send it.
+        """
+        if fcntl is None:
+            msg = "usbfs is Linux-only"
+            raise OSError(msg)
+        self._fd = os.open(self.path, os.O_RDWR)
+
+        # Ask the kernel to let go. Harmless if nothing was bound, which is why
+        # the failure is ignored rather than reported.
+        disconnect = _DevfsIoctl(self.interface, USBDEVFS_DISCONNECT, None)
+        with contextlib.suppress(OSError):
+            fcntl.ioctl(self._fd, USBDEVFS_IOCTL, disconnect, True)
+
+        claim = ctypes.c_uint(self.interface)
+        fcntl.ioctl(self._fd, USBDEVFS_CLAIMINTERFACE, claim, True)
+
+    def write(self, payload: bytes, timeout_ms: int = 2000) -> int:
+        """Send one transfer to the OUT endpoint. Returns bytes accepted."""
+        if self._fd is None:
+            msg = "device is not open"
+            raise OSError(msg)
+        buffer = ctypes.create_string_buffer(payload, len(payload))
+        transfer = _BulkTransfer(
+            ep=self.endpoint,
+            len=len(payload),
+            timeout=timeout_ms,
+            data=ctypes.cast(buffer, ctypes.c_void_p),
+        )
+        return fcntl.ioctl(self._fd, USBDEVFS_BULK, transfer, True)
+
+    def close(self) -> None:
+        """Release the interface and close the node."""
+        if self._fd is None:
+            return
+        release = ctypes.c_uint(self.interface)
+        with contextlib.suppress(OSError):
+            fcntl.ioctl(self._fd, USBDEVFS_RELEASEINTERFACE, release, True)
+        os.close(self._fd)
+        self._fd = None
+
+
+def send_usbfs(packets: list[bytes], init_delay: float, chunk_delay: float) -> str | None:
+    """Write every packet over usbfs. Returns None on success, else a reason."""
+    located = find_usb_device()
+    if located is None:
+        return "panel not found on the USB bus"
+    bus, devnum, sysfs = located
+
+    target = find_output_endpoint(usb_interfaces(sysfs))
+    if target is None:
+        return "no interface publishes an OUT endpoint"
+    interface, endpoint = target
+
+    device = UsbfsDevice(bus, devnum, interface, endpoint)
+    try:
+        device.open()
+    except OSError as exc:
+        return f"could not claim interface {interface}: {exc}"
+
+    try:
+        if init_delay > 0:
+            time.sleep(init_delay)
+        for index, packet in enumerate(packets):
+            # The report-ID byte is a hidraw convention. On the wire the
+            # device expects the signature first, so it is dropped here.
+            payload = packet[1:]
+            written = device.write(payload)
+            if written != len(payload):
+                return f"short transfer on packet {index}: {written} of {len(payload)}"
+            if chunk_delay > 0:
+                time.sleep(chunk_delay)
+    except OSError as exc:
+        return f"transfer failed: {exc}"
+    finally:
+        device.close()
+
+    return None
+
+
+def describe_usb() -> int:
+    """Print the panel's USB topology. Returns a process exit status."""
+    located = find_usb_device()
+    if located is None:
+        print("panel not found on the USB bus", file=sys.stderr)
+        return 1
+    bus, devnum, sysfs = located
+
+    print("")
+    print(f"USB device {VENDOR_ID:04X}:{PRODUCT_ID:04X} at {sysfs.name}")
+    print(f"  node: /dev/bus/usb/{bus:03d}/{devnum:03d}")
+    print("")
+
+    interfaces = usb_interfaces(sysfs)
+    kinds = {
+        0: "control",
+        1: "isochronous",
+        _TRANSFER_BULK: "bulk",
+        _TRANSFER_INTERRUPT: "interrupt",
+    }
+    for interface in interfaces:
+        driver = interface["driver"] or "(none)"
+        print(f"  interface {interface['number']}  class {interface['class']}  driver {driver}")
+        endpoints = interface["endpoints"]
+        assert isinstance(endpoints, list)
+        if not endpoints:
+            print("      no endpoints")
+        for endpoint in endpoints:
+            kind = kinds.get(int(endpoint["kind"]), "?")
+            print(
+                f"      ep 0x{int(endpoint['address']):02x} {endpoint['direction']:<3} "
+                f"{kind:<9} {endpoint['packet_size']} bytes"
+            )
+        print("")
+
+    target = find_output_endpoint(interfaces)
+    if target is None:
+        print("No OUT endpoint anywhere. This panel cannot be written to over USB")
+        print("in any obvious way, which would be a genuinely surprising result.")
+        return 1
+
+    interface, endpoint = target
+    print(f"frames should go to interface {interface}, endpoint 0x{endpoint:02x}")
+    print("run with --transport usbfs to try exactly that")
+    return 0
+
+
 # -- Sweep ------------------------------------------------------------------
 
 # Each entry is (name, framing, send_init, seq_first, chunk_delay, colour).
@@ -623,6 +923,22 @@ def build_parser() -> argparse.ArgumentParser:
         help="What to draw (default: bars).",
     )
     parser.add_argument(
+        "--transport",
+        choices=("usbfs", "hidraw"),
+        default="usbfs",
+        help=(
+            "How to reach the panel. 'usbfs' claims the interface and writes "
+            "to its endpoint, which is what libusb does and what the working "
+            "implementations for this hardware use (default). 'hidraw' is the "
+            "kernel HID path, which this panel does not answer on."
+        ),
+    )
+    parser.add_argument(
+        "--usb",
+        action="store_true",
+        help="Print the panel's USB interfaces and endpoints, and exit.",
+    )
+    parser.add_argument(
         "--descriptors",
         action="store_true",
         help=(
@@ -691,6 +1007,15 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def diagnostics_only(args: argparse.Namespace) -> int | None:
+    """Run a read-only diagnostic if one was asked for, else return None."""
+    if args.usb:
+        return describe_usb()
+    if args.descriptors:
+        return describe_nodes()
+    return None
+
+
 def main() -> int:
     args = build_parser().parse_args()
 
@@ -700,8 +1025,9 @@ def main() -> int:
         marker = " <- display" if interface == LCD_INTERFACE else ""
         print(f"  {path} if{interface}{marker}")
 
-    if args.descriptors:
-        return describe_nodes()
+    diagnostic = diagnostics_only(args)
+    if diagnostic is not None:
+        return diagnostic
 
     targets = [Path(args.node)] if args.node is not None else candidate_order(nodes)
 
@@ -728,17 +1054,44 @@ def main() -> int:
         )
         return 1
 
+    if args.transport == "usbfs":
+        return run_usbfs(args, packets)
+
     if args.sweep:
-        # Choose the node by what it declares, not by whether a write returned
-        # success: an input-only interface accepts writes and cannot possibly
-        # be the display, which is the trap that cost the last two rounds.
-        target = writable_node(nodes)
-        if target is None:
-            print("no interface declares an output report; nothing to sweep", file=sys.stderr)
-            return 1
-        return sweep(target, args.init_delay, args.settle)
+        return run_sweep(args, nodes)
 
     return run_once(args, targets, packets)
+
+
+def run_sweep(args: argparse.Namespace, nodes: list[tuple[Path, int]]) -> int:
+    """Sweep framings on the node that can actually receive them."""
+    # Choose by what the interface declares, not by whether a write returned
+    # success: an input-only interface accepts writes and cannot possibly be
+    # the display, which is the trap that cost two earlier rounds.
+    target = writable_node(nodes)
+    if target is None:
+        print("no interface declares an output report; nothing to sweep", file=sys.stderr)
+        return 1
+    return sweep(target, args.init_delay, args.settle)
+
+
+def run_usbfs(args: argparse.Namespace, packets: list[bytes]) -> int:
+    """Send one frame over usbfs. Returns a process exit status."""
+    print("sending over usbfs (claiming the interface, as libusb does)")
+    problem = send_usbfs(packets, args.init_delay, args.chunk_delay)
+    if problem is not None:
+        print(f"  {problem}", file=sys.stderr)
+        print("", file=sys.stderr)
+        print("Permission denied here means the container cannot write to", file=sys.stderr)
+        print("/dev/bus/usb -- Protection Mode off, or a privileged add-on.", file=sys.stderr)
+        return 1
+
+    print(f"wrote {len(packets)} packets over usbfs")
+    if args.pattern == "bars":
+        print("")
+        print("Now look at the panel. Left to right, the bars should be:")
+        print("  " + ", ".join(name for name, _ in BARS))
+    return 0
 
 
 def run_once(

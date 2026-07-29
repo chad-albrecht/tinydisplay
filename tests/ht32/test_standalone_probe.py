@@ -13,6 +13,7 @@ probe does not, the suite fails here.
 
 from __future__ import annotations
 
+import ctypes
 import importlib.util
 import sys
 from pathlib import Path
@@ -359,6 +360,91 @@ class TestReportDescriptorParsing:
     def test_a_long_item_is_skipped(self, probe: ModuleType) -> None:
         descriptor = bytes([0xFE, 0x02, 0x00, 0xAA, 0xBB, 0x75, 0x08, 0x95, 0x02, 0x91, 0x02])
         assert probe.parse_report_descriptor(descriptor)["output"] == [(0, 2)]
+
+
+class TestUsbfsIoctls:
+    """The ioctl numbers must match the kernel's, or nothing works.
+
+    These are pure arithmetic, so they can be checked anywhere -- which
+    matters, because the machine that can actually exercise them is the one
+    machine where a mistake is expensive to debug. The expected values are the
+    published constants from linux/usbdevice_fs.h on 64-bit.
+    """
+
+    def test_claim_interface(self, probe: ModuleType) -> None:
+        assert probe.USBDEVFS_CLAIMINTERFACE == 0x8004550F
+
+    def test_release_interface(self, probe: ModuleType) -> None:
+        assert probe.USBDEVFS_RELEASEINTERFACE == 0x80045510
+
+    def test_disconnect(self, probe: ModuleType) -> None:
+        assert probe.USBDEVFS_DISCONNECT == 0x5516
+
+    @pytest.mark.skipif(ctypes.sizeof(ctypes.c_void_p) != 8, reason="64-bit layout")
+    def test_bulk_transfer_struct_is_the_kernel_layout(self, probe: ModuleType) -> None:
+        # 4 + 4 + 4 + padding + 8. Getting the padding wrong changes the ioctl
+        # number and the kernel rejects the call outright.
+        assert ctypes.sizeof(probe._BulkTransfer) == 24
+        assert probe.USBDEVFS_BULK == 0xC0185502
+
+    @pytest.mark.skipif(ctypes.sizeof(ctypes.c_void_p) != 8, reason="64-bit layout")
+    def test_devfs_ioctl_struct_is_the_kernel_layout(self, probe: ModuleType) -> None:
+        assert ctypes.sizeof(probe._DevfsIoctl) == 16
+        assert probe.USBDEVFS_IOCTL == 0xC0105512
+
+    def test_the_encoder_matches_the_macro(self, probe: ModuleType) -> None:
+        # _IOR('U', 15, unsigned int), spelled out.
+        assert probe._ioc(2, "U", 15, 4) == (2 << 30) | (4 << 16) | (0x55 << 8) | 15
+
+
+class TestEndpointSelection:
+    def test_picks_an_interrupt_out_endpoint(self, probe: ModuleType) -> None:
+        interfaces = [
+            {
+                "number": 0,
+                "endpoints": [{"address": 0x81, "kind": 3, "packet_size": 8, "direction": "in"}],
+            },
+            {
+                "number": 1,
+                "endpoints": [{"address": 0x02, "kind": 3, "packet_size": 64, "direction": "out"}],
+            },
+        ]
+        assert probe.find_output_endpoint(interfaces) == (1, 0x02)
+
+    def test_ignores_in_endpoints(self, probe: ModuleType) -> None:
+        interfaces = [
+            {
+                "number": 0,
+                "endpoints": [{"address": 0x81, "kind": 3, "packet_size": 64, "direction": "in"}],
+            }
+        ]
+        assert probe.find_output_endpoint(interfaces) is None
+
+    def test_prefers_the_larger_endpoint(self, probe: ModuleType) -> None:
+        # A keypad's OUT endpoint is small; the display's moves real data.
+        interfaces = [
+            {
+                "number": 0,
+                "endpoints": [{"address": 0x01, "kind": 3, "packet_size": 8, "direction": "out"}],
+            },
+            {
+                "number": 2,
+                "endpoints": [{"address": 0x03, "kind": 2, "packet_size": 512, "direction": "out"}],
+            },
+        ]
+        assert probe.find_output_endpoint(interfaces) == (2, 0x03)
+
+    def test_ignores_control_and_isochronous(self, probe: ModuleType) -> None:
+        interfaces = [
+            {
+                "number": 0,
+                "endpoints": [{"address": 0x01, "kind": 1, "packet_size": 64, "direction": "out"}],
+            }
+        ]
+        assert probe.find_output_endpoint(interfaces) is None
+
+    def test_no_interfaces_selects_nothing(self, probe: ModuleType) -> None:
+        assert probe.find_output_endpoint([]) is None
 
 
 class TestInitDelay:
