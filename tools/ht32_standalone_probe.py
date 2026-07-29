@@ -341,6 +341,122 @@ def send(
     return None
 
 
+# -- HID report descriptors -------------------------------------------------
+#
+# The decisive diagnostic, and the one to reach for first when a device accepts
+# writes and does nothing. A HID device *declares* its reports: how many, what
+# ID each carries, and exactly how many bytes each holds. The kernel enforces
+# those sizes. So an interface with no OUTPUT report will swallow anything sent
+# to it and act on none of it, and an interface whose OUTPUT report is a
+# different size than we send will reject or truncate the write.
+#
+# Parsing the descriptor turns "which interface is the display?" from a guess
+# into a lookup: the display is the one declaring an output report big enough
+# to carry a 4096-byte chunk.
+
+# Item prefix: bTag in the top four bits, bType in bits 2-3, bSize in bits 0-1.
+_ITEM_SIZES = (0, 1, 2, 4)
+
+_TAG_REPORT_SIZE = 0x74
+_TAG_REPORT_ID = 0x84
+_TAG_REPORT_COUNT = 0x94
+_TAG_OUTPUT = 0x90
+_TAG_INPUT = 0x80
+_TAG_FEATURE = 0xB0
+
+# Long items carry no report geometry, so they are skipped wholesale.
+_LONG_ITEM_PREFIX = 0xFE
+
+
+def parse_report_descriptor(data: bytes) -> dict[str, list[tuple[int, int]]]:
+    """Extract report sizes from a HID report descriptor.
+
+    Returns ``{"output": [(report_id, size_in_bytes), ...], "input": [...],
+    "feature": [...]}``. Sizes are the payload the device expects, excluding
+    the report-ID byte that hidraw prepends.
+
+    This is a deliberately partial parser: it tracks only the global items that
+    determine report sizes and ignores usages, collections and everything else,
+    because the only question being asked is how big a report may be.
+    """
+    reports: dict[str, list[tuple[int, int]]] = {"input": [], "output": [], "feature": []}
+    report_size = 0
+    report_count = 0
+    report_id = 0
+    bits: dict[tuple[str, int], int] = {}
+
+    index = 0
+    while index < len(data):
+        prefix = data[index]
+        index += 1
+        if prefix == _LONG_ITEM_PREFIX:
+            if index >= len(data):
+                break
+            index += 2 + data[index]
+            continue
+
+        length = _ITEM_SIZES[prefix & 0x03]
+        value = int.from_bytes(data[index : index + length], "little")
+        index += length
+        tag = prefix & 0xFC
+
+        if tag == _TAG_REPORT_SIZE:
+            report_size = value
+        elif tag == _TAG_REPORT_COUNT:
+            report_count = value
+        elif tag == _TAG_REPORT_ID:
+            report_id = value
+        elif tag in (_TAG_INPUT, _TAG_OUTPUT, _TAG_FEATURE):
+            kind = {_TAG_INPUT: "input", _TAG_OUTPUT: "output", _TAG_FEATURE: "feature"}[tag]
+            key = (kind, report_id)
+            bits[key] = bits.get(key, 0) + report_size * report_count
+
+    for (kind, ident), total_bits in bits.items():
+        reports[kind].append((ident, (total_bits + 7) // 8))
+    for entries in reports.values():
+        entries.sort()
+    return reports
+
+
+def describe_nodes() -> int:
+    """Print what each hidraw node declares. Returns a process exit status."""
+    nodes = find_nodes()
+    if not nodes:
+        print("no HT32 panel nodes found", file=sys.stderr)
+        return 1
+
+    print("")
+    print("HID report descriptors -- the display is the interface declaring an")
+    print(f"output report large enough for a {DATA_SIZE}-byte chunk:")
+    print("")
+
+    for path, interface in nodes:
+        sysfs = HIDRAW_ROOT / path.name / "device" / "report_descriptor"
+        try:
+            data = sysfs.read_bytes()
+        except OSError as exc:
+            print(f"{path} if{interface}: could not read descriptor: {exc}")
+            continue
+
+        reports = parse_report_descriptor(data)
+        print(f"{path} if{interface}  ({len(data)}-byte descriptor)")
+        for kind in ("output", "input", "feature"):
+            if not reports[kind]:
+                print(f"    {kind:<8} none")
+                continue
+            for ident, size in reports[kind]:
+                verdict = ""
+                if kind == "output" and size >= DATA_SIZE:
+                    verdict = "  <- big enough to be the display"
+                print(f"    {kind:<8} report id {ident:<3} {size} bytes{verdict}")
+        print("")
+
+    print("If no interface declares a large output report, this panel is not")
+    print("driven by HID output reports at all -- the transfers must go out some")
+    print("other way, and writing to /dev/hidraw will never work.")
+    return 0
+
+
 # -- Sweep ------------------------------------------------------------------
 
 # Each entry is (name, send_orientation, send_heartbeat, seq_first, chunk_delay)
@@ -413,13 +529,21 @@ def sweep(target: Path, init_delay: float, settle: float) -> int:
 # -- Entry point ------------------------------------------------------------
 
 
-def main() -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--pattern",
         choices=("bars", "white", "gradient", "black", *SOLIDS),
         default="bars",
         help="What to draw (default: bars).",
+    )
+    parser.add_argument(
+        "--descriptors",
+        action="store_true",
+        help=(
+            "Print what each interface declares and exit. Run this when the "
+            "panel accepts writes but does not change."
+        ),
     )
     parser.add_argument(
         "--sweep",
@@ -470,13 +594,20 @@ def main() -> int:
         action="store_true",
         help="Build the packets and report, without writing.",
     )
-    args = parser.parse_args()
+    return parser
+
+
+def main() -> int:
+    args = build_parser().parse_args()
 
     print(f"looking for {VENDOR_ID:04X}:{PRODUCT_ID:04X}")
     nodes = find_nodes()
     for path, interface in nodes:
         marker = " <- display" if interface == LCD_INTERFACE else ""
         print(f"  {path} if{interface}{marker}")
+
+    if args.descriptors:
+        return describe_nodes()
 
     targets = [Path(args.node)] if args.node is not None else candidate_order(nodes)
 
@@ -512,6 +643,15 @@ def main() -> int:
         print("no node accepted a frame, so there is nothing to sweep", file=sys.stderr)
         return 1
 
+    return run_once(args, targets, packets)
+
+
+def run_once(
+    args: argparse.Namespace,
+    targets: list[Path],
+    packets: list[bytes],
+) -> int:
+    """Send one frame to the first node that accepts it."""
     target = None
     for candidate in targets:
         print(f"trying {candidate} (waiting {args.init_delay}s for the panel to wake)")
@@ -525,9 +665,9 @@ def main() -> int:
         print("", file=sys.stderr)
         print("no node accepted the frame", file=sys.stderr)
         print(
-            "ETIMEDOUT on every node usually means the packet framing is wrong "
-            "rather than the device being absent -- the panel is there, it just "
-            "did not answer.",
+            "ETIMEDOUT on every node usually means the report size is wrong for "
+            "that interface -- run with --descriptors to see what each one "
+            "actually declares.",
             file=sys.stderr,
         )
         return 1
@@ -539,6 +679,7 @@ def main() -> int:
         print("  " + ", ".join(name for name, _ in BARS))
         print("")
         print("If the leftmost bar is not RED, the byte order is wrong.")
+        print("If the panel is unchanged, run with --descriptors.")
     return 0
 
 

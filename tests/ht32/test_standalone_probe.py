@@ -219,6 +219,82 @@ class TestSweep:
         assert probe.SWEEP[0][0] == "orientation + heartbeat"
 
 
+class TestReportDescriptorParsing:
+    """The parser is a diagnostic, so it must not invent findings.
+
+    A wrong answer here would send somebody rewriting a protocol that was
+    already correct, so the cases below are the ones that decide which
+    interface gets written to.
+    """
+
+    def test_an_output_report_is_measured_in_bytes(self, probe: ModuleType) -> None:
+        # Report Size 8 bits, Report Count 4104, Output.
+        descriptor = bytes([0x75, 0x08, 0x96, 0x08, 0x10, 0x91, 0x02])
+        reports = probe.parse_report_descriptor(descriptor)
+        assert reports["output"] == [(0, 4104)]
+
+    def test_report_ids_are_kept_apart(self, probe: ModuleType) -> None:
+        descriptor = bytes(
+            [
+                0x85,
+                0x01,  # Report ID 1
+                0x75,
+                0x08,
+                0x95,
+                0x40,
+                0x91,
+                0x02,  # 64 bytes output
+                0x85,
+                0x02,  # Report ID 2
+                0x75,
+                0x08,
+                0x95,
+                0x08,
+                0x91,
+                0x02,  # 8 bytes output
+            ]
+        )
+        assert probe.parse_report_descriptor(descriptor)["output"] == [(1, 64), (2, 8)]
+
+    def test_input_and_output_are_not_confused(self, probe: ModuleType) -> None:
+        # A consumer-control interface has inputs and no outputs -- writing to
+        # it is accepted and ignored, which is the failure being diagnosed.
+        descriptor = bytes([0x75, 0x08, 0x95, 0x03, 0x81, 0x02])
+        reports = probe.parse_report_descriptor(descriptor)
+        assert reports["input"] == [(0, 3)]
+        assert reports["output"] == []
+
+    def test_repeated_output_items_accumulate(self, probe: ModuleType) -> None:
+        descriptor = bytes([0x75, 0x08, 0x95, 0x04, 0x91, 0x02, 0x91, 0x02])
+        assert probe.parse_report_descriptor(descriptor)["output"] == [(0, 8)]
+
+    def test_bit_sized_reports_round_up_to_whole_bytes(self, probe: ModuleType) -> None:
+        descriptor = bytes([0x75, 0x01, 0x95, 0x03, 0x91, 0x02])
+        assert probe.parse_report_descriptor(descriptor)["output"] == [(0, 1)]
+
+    def test_a_four_byte_item_is_read(self, probe: ModuleType) -> None:
+        # bSize 3 means four data bytes, not three.
+        descriptor = bytes([0x75, 0x08, 0x97, 0x08, 0x10, 0x00, 0x00, 0x91, 0x02])
+        assert probe.parse_report_descriptor(descriptor)["output"] == [(0, 4104)]
+
+    def test_an_empty_descriptor_yields_nothing(self, probe: ModuleType) -> None:
+        assert probe.parse_report_descriptor(b"") == {
+            "input": [],
+            "output": [],
+            "feature": [],
+        }
+
+    def test_a_truncated_descriptor_does_not_hang_or_raise(self, probe: ModuleType) -> None:
+        # Reading sysfs can hand back anything; a diagnostic that crashes on
+        # bad input is a diagnostic that stops the investigation.
+        for cut in range(1, 8):
+            probe.parse_report_descriptor(bytes([0x75, 0x08, 0x95, 0x40, 0x91, 0x02])[:cut])
+
+    def test_a_long_item_is_skipped(self, probe: ModuleType) -> None:
+        descriptor = bytes([0xFE, 0x02, 0x00, 0xAA, 0xBB, 0x75, 0x08, 0x95, 0x02, 0x91, 0x02])
+        assert probe.parse_report_descriptor(descriptor)["output"] == [(0, 2)]
+
+
 class TestInitDelay:
     def test_matches_the_package_default(self, probe: ModuleType) -> None:
         # The standalone copy waiting a different amount than the driver would
