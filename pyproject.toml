@@ -5,15 +5,16 @@ exclude = [
     "packages/ht32",
     "packages/homeassistant",
     "packages/widgets",
-    "packages/simulator",
 ]
 
 [tool.uv.sources]
 tinydisplay-core = { workspace = true }
+tinydisplay-simulator = { workspace = true }
 
 [dependency-groups]
 dev = [
     "tinydisplay-core",
+    "tinydisplay-simulator",
     "mypy>=1.11",
     "pre-commit>=3.8",
     "pytest>=8.3",
@@ -28,7 +29,7 @@ dev = [
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["packages/core/src", "tests"]
+src = ["packages/core/src", "packages/simulator/src", "tests"]
 
 [tool.ruff.lint]
 select = [
@@ -72,6 +73,13 @@ ignore = [
 ]
 "examples/**" = ["T20"]  # Examples print to stdout on purpose.
 
+# Tk is imported inside the functions that need it, never at module scope, so
+# that importing the simulator -- or collecting its tests -- works on a machine
+# with no GUI toolkit installed. See tinydisplay.simulator.window.
+"packages/simulator/src/tinydisplay/simulator/window.py" = ["PLC0415"]
+"tests/simulator/test_window.py" = ["PLC0415"]
+"tests/simulator/test_cli.py" = ["PLC0415"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["tinydisplay"]
 
@@ -87,7 +95,7 @@ docstring-code-format = true
 [tool.mypy]
 python_version = "3.12"
 strict = true
-mypy_path = "packages/core/src"
+mypy_path = "packages/core/src:packages/simulator/src"
 files = ["packages", "tests", "examples"]
 namespace_packages = true
 explicit_package_bases = true
@@ -103,13 +111,19 @@ ignore_missing_imports = true
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
-testpaths = ["tests", "packages/core/src"]
-pythonpath = ["packages/core/src"]
+testpaths = ["tests", "packages/core/src", "packages/simulator/src"]
+pythonpath = ["packages/core/src", "packages/simulator/src"]
 asyncio_mode = "auto"
 addopts = [
     "--strict-markers",
     "--strict-config",
     "--doctest-modules",
+    # Each package gets its own tests/<package>/ directory, so basenames
+    # collide by design (tests/core/test_driver.py and
+    # tests/simulator/test_driver.py both exist). importlib mode imports test
+    # modules by location rather than by basename, which the default prepend
+    # mode cannot do without scattering __init__.py files through tests/.
+    "--import-mode=importlib",
     "-ra",
 ]
 filterwarnings = ["error"]

@@ -4,9 +4,10 @@
 from Home Assistant, with configurable dashboards that are not tied to any one
 device.
 
-> **Status: Phase 1, pre-alpha.** The rendering engine (`tinydisplay-core`) is
-> implemented and tested. Hardware drivers, widgets, the simulator, and the
-> Home Assistant integration are not yet written.
+> **Status: Phase 2, pre-alpha.** The rendering engine (`tinydisplay-core`) and
+> the desktop simulator (`tinydisplay-simulator`) are implemented and tested.
+> Hardware drivers, widgets, and the Home Assistant integration are not yet
+> written.
 
 ## Why
 
@@ -46,9 +47,9 @@ a canvas it never drew.
 | Package | Status | Purpose |
 | --- | --- | --- |
 | [`packages/core`](packages/core) | **Implemented** | Rendering engine: canvas, widgets, driver abstraction |
+| [`packages/simulator`](packages/simulator) | **Implemented** | Desktop preview, no hardware needed |
 | [`packages/ht32`](packages/ht32) | Planned | HT32 panel driver (320x170, RGB565, USB HID) |
 | [`packages/widgets`](packages/widgets) | Planned | Built-in widget library |
-| [`packages/simulator`](packages/simulator) | Planned | Desktop preview, no hardware needed |
 | [`packages/homeassistant`](packages/homeassistant) | Planned | Home Assistant custom integration |
 
 See [docs/architecture.md](docs/architecture.md) for the reasoning behind the
@@ -61,6 +62,12 @@ git clone https://github.com/chad-albrecht/tinydisplay
 cd tinydisplay
 uv sync
 uv run python examples/hello_world.py
+```
+
+To see it live, run the simulator and edit the dashboard with the window open:
+
+```bash
+uv run python -m tinydisplay.simulator examples/simulator_dashboard.py
 ```
 
 Without `uv`:

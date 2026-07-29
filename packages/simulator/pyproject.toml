@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tinydisplay-simulator"
+version = "0.1.0"
+description = "Desktop simulator driver for TinyDisplay: render dashboards to a window instead of hardware."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["display", "simulator", "rendering", "embedded", "dashboard"]
+authors = [{ name = "The TinyDisplay authors" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Environment :: X11 Applications",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Multimedia :: Graphics",
+    "Topic :: Software Development :: Embedded Systems",
+    "Typing :: Typed",
+]
+dependencies = [
+    # The rendering engine, the DisplayDriver contract and RGB565 packing.
+    "tinydisplay-core",
+    # Frame decoding and nearest-neighbour upscaling, vectorised.
+    "numpy>=1.26",
+    # ImageTk bridges a decoded frame into a Tk widget.
+    "pillow>=10.1",
+]
+
+# Tkinter is deliberately absent from `dependencies`: it ships with CPython and
+# is not installable from PyPI. On most Linux distributions it is a separate
+# system package (`python3-tk`), so `tinydisplay.simulator.window` imports it
+# lazily and reports a readable error rather than failing at import time.
+
+[project.scripts]
+tinydisplay-simulator = "tinydisplay.simulator.__main__:main"
+
+[project.urls]
+Homepage = "https://github.com/chad-albrecht/tinydisplay"
+Source = "https://github.com/chad-albrecht/tinydisplay"
+Issues = "https://github.com/chad-albrecht/tinydisplay/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tinydisplay"]

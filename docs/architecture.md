@@ -139,6 +139,30 @@ A deliberate detail: `disconnect()` marks the driver disconnected even when the
 underlying close *fails*. A transport that errors on close must not leave the
 object wedged in a state where it refuses both further writes and reconnection.
 
+## Why the simulator previews the encoded frame
+
+`SimulatorDriver` does not display the canvas it is handed. It encodes that
+canvas exactly as a real panel would, then decodes those bytes back for the
+window.
+
+Previewing the canvas directly would be simpler and wrong. It would show a
+perfect 24-bit image regardless of what the driver did to it, hiding precisely
+the class of bug — swapped endianness, a dropped channel, a wrong stride — that
+a simulator is supposed to catch before hardware arrives.
+
+Decoding the wire bytes also means the RGB565 quantisation preview is not a
+feature. It is a consequence: decoding a 16-bit frame *is* the quantised image.
+There is no second "simulate a cheap panel" code path that could drift from the
+real conversion, and the decoder is pinned to `Color.from_rgb565` by a test that
+compares them pixel for pixel.
+
+The corollary is that fidelity is controlled by `pixel_format` rather than by a
+flag. `RGB565_LE` shows what the panel shows; `RGB888` shows the flattering
+original. A boolean would have allowed the two to disagree.
+
+Magnification is nearest-neighbour for the same reason: a smooth filter would
+blur away the banding the operator is meant to see.
+
 ## Dirty tracking
 
 Widgets carry a dirty flag that propagates to ancestors on change. Nothing in

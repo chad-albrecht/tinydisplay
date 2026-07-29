@@ -15,15 +15,25 @@ repository releasable.
 - `Widget` / `Container`: composition, clipping, dirty tracking.
 - `DisplayDriver` abstract base class plus `MemoryDriver`.
 
-## Phase 2 — Simulator
+## Phase 2 — Simulator ✅
 
-**`tinydisplay-simulator`.** Before hardware, because it makes hardware easier
-to debug: if the simulator and the panel disagree, the driver is at fault.
+**`tinydisplay-simulator`.** Complete. Before hardware, because it makes
+hardware easier to debug: if the simulator and the panel disagree, the driver
+is at fault.
 
-- A `DisplayDriver` that renders to a desktop window.
-- Optional RGB565 quantisation preview, so the desktop shows what the panel
-  will actually display rather than a flattering 24-bit version.
-- Hot-reload of a dashboard definition from disk.
+- `SimulatorDriver`: a `DisplayDriver` rendering to a Tk window, with
+  nearest-neighbour magnification so quantisation banding stays visible.
+- The preview decodes the *encoded* frame rather than the source canvas, so a
+  byte-order or packing bug is as visible on screen as it would be on the
+  panel. RGB565 quantisation preview falls out of that by construction; the
+  pixel format is the fidelity control, with `RGB888` giving the flattering
+  24-bit view.
+- `PreviewWindow` protocol with a `NullPreviewWindow` recorder, so the whole
+  stack runs headless in CI.
+- `DashboardLoader`: hot-reload of a `render(canvas)` module, polling
+  `st_mtime_ns`. A failed reload keeps the last working dashboard and paints
+  the error onto the panel.
+- A render loop and a CLI: `python -m tinydisplay.simulator dashboard.py`.
 
 ## Phase 3 — HT32 driver
 
