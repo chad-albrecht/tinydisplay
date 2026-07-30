@@ -327,9 +327,18 @@ def device_payload(packet: bytes) -> bytes:
 
 
 def build_orientation_packet(*, landscape: bool = True) -> bytes:
-    """Tell the panel which way round its image should be.
+    """Build the orientation command upstream sends.
 
-    Confirmed against hardware during bring-up.
+    **This has no observable effect on an AceMagic S1.** Values 0x00 through
+    0x04 were swept against a real panel and none of them changed the image,
+    so the command appears to be unimplemented in this firmware. The framing is
+    still known to be right -- it is the same config packet as the heartbeat --
+    so this is kept for panels that may honour it, and for anyone probing
+    further with :func:`build_config_packet`.
+
+    Do not reach for this to correct a sideways or upside-down picture. On the
+    S1 the panel is mounted upside down and the host compensates; see
+    :class:`~tinydisplay.ht32.driver.HT32Driver`'s ``rotate_180``.
 
     Example:
         >>> from tinydisplay.ht32.protocol import build_orientation_packet

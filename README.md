@@ -4,20 +4,20 @@
 from Home Assistant, with configurable dashboards that are not tied to any one
 device.
 
-> **Status: Phase 5, pre-alpha.** All five packages are implemented and tested,
-> and the HT32 driver is **confirmed working on real hardware** — an AceMagic
-> S1's built-in panel, driven from an add-on container.
+> **Status: Phase 5, pre-alpha.** All five packages are implemented and tested.
+> The HT32 driver is **confirmed working on real hardware** — an AceMagic S1's
+> built-in panel, now driven from inside Home Assistant's own Core container
+> with the picture the right way up. Getting there found that the panel is
+> mounted upside down, that its orientation command is inert, and that the
+> bring-up pattern which had "verified" Phase 3 was structurally unable to
+> notice either.
 >
-> The Home Assistant integration is written and has never been run inside Home
-> Assistant. Bring-up reached the panel from an **add-on**, which can request
-> raw USB privileges; an integration runs in the **Core** container and cannot.
-> Core turns out to see `/dev/bus/usb`, which settles the part that would have
-> been fatal — whether it can *write* there is what
-> [`tools/ht32_usbfs_preflight.py`](tools/ht32_usbfs_preflight.py) checks.
-> Separately, the packages the manifest pins are not on PyPI, so the
-> requirement has to be satisfied by hand.
+> The Home Assistant **integration** has still never been run. The library
+> beneath it has, end to end, on the panel. What remains is the config flow and
+> the setup path, plus the fact that the packages the manifest pins are not on
+> PyPI, so the requirement has to be satisfied by hand.
 > [Before you start](custom_components/tinydisplay/README.md#before-you-start)
-> has both.
+> covers both.
 
 ## Why
 

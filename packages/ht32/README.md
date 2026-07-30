@@ -172,18 +172,35 @@ that the copy still agrees with this package. See also
 
 ### Verified against hardware
 
-Confirmed on an AceMagic S1 running Home Assistant OS: colour bars rendered in
-the correct order, with red rendering as red. That single image validates the
-byte order, the 27-chunk framing and the header layout at once.
+Confirmed on an AceMagic S1 running Home Assistant OS.
 
-Bring-up corrected three things that no document got right:
+**What the colour-bar image established:** the byte order (red renders as red),
+the 27-chunk framing, and the header layout — all three at once.
+
+**What it did not:** the orientation. This section used to say the bars
+rendered "in the correct order"; they did not. The panel is mounted upside
+down, so the bars were reversed and their labels sat at the top, inverted.
+Vertical bars are symmetric top to bottom, so the check this pattern tells you
+to make — *the bar labelled red is red* — passes on an upside-down panel. Use
+`--pattern corners` for orientation; it carries its own reference and cannot be
+fooled that way.
+
+Bring-up corrected several things that no document got right:
 
 - **`hidraw` does not work at all.** See below — this is the big one.
-- **The display is not interface 1.** Upstream hard-codes it; the S1 publishes
-  interfaces 0 and 2 and no interface 1. The transport now chooses by
-  capability, picking whichever interface publishes an OUT endpoint.
+- **~~The display is not interface 1.~~** Retracted. The S1 *does* publish an
+  interface 1, and it is the display — it carries the only bare OUT endpoint
+  and has no kernel driver bound. It looked absent because the original survey
+  enumerated through `hidraw`, which only lists interfaces `usbhid` has
+  claimed, and interface 1 is exactly the one it has not. Upstream's hard-coded
+  number was right. Choosing by capability is still the better rule, but the
+  premise it was argued from was false.
 - **Bytes 4-7 are ignored by the firmware.** The offset field this package
   once carried a warning about never mattered.
+- **The panel is mounted upside down.** `HT32Driver` turns each frame half a
+  revolution before encoding it (`rotate_180`, on by default). The panel's own
+  orientation command is inert — values `0x00` through `0x04` were swept
+  against hardware and none changed the image.
 
 Run the integration tests with a panel attached:
 
@@ -226,12 +243,17 @@ working reference implementation byte for byte, and the first one is sent
 every session already showing the banner, so the first keep-alive is what
 clears it, not what maintains it.
 
-**Partly open.** The banner has been seen on hardware during a run that was
-sending keep-alives on a timer, with the first one scheduled an interval in
-rather than sent immediately. Sending it up front is the fix for the startup
-gap and for a watchdog that looks to be about a second long, but it has not yet
-been confirmed on hardware that the banner stays away for a long run. If it
-reappears, the knobs to try are a shorter interval and
+**Largely settled.** The banner was originally seen during a run sending
+keep-alives on a timer with the first one scheduled an interval in rather than
+sent immediately. Sending it up front fixes both the startup gap and a watchdog
+that looks to be about a second long. Phase 5 confirmed the other half from the
+opposite direction: the `frame` subcommand sent no keep-alive at all, drew one
+frame and exited, and the banner appeared over it about a second later on
+entirely healthy hardware. With the keep-alive sent first and repeated every
+second, runs of 20-30 seconds hold the image cleanly.
+
+Still unconfirmed: that it holds for hours rather than seconds. If the banner
+reappears on a long run, the knobs to try are a shorter interval and
 `build_config_packet(0xF3, ...)` — documentation for this panel mentions
 `0xA1 0xF2/0xF3` together without saying what the second one is for.
 

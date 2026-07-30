@@ -38,10 +38,18 @@ is at fault.
 ## Phase 3 — HT32 driver ✅
 
 **`tinydisplay-ht32`.** Complete and **verified on hardware** — an AceMagic S1
-running Home Assistant OS, drawing colour bars in the correct order with red
-rendering as red, which validates byte order, framing and header layout at
-once. 320x170, RGB565, VID:PID `04D9:FD01`, with LED control over a CH340
-serial link at 10000 baud.
+running Home Assistant OS. 320x170, RGB565, VID:PID `04D9:FD01`, with LED
+control over a CH340 serial link at 10000 baud.
+
+What that verification established, precisely, matters — because for a while
+this section claimed more than it had. The colour-bar image confirmed the byte
+order (red renders as red), the 27-chunk framing and the header layout. It did
+**not** confirm the image's orientation, and the claim that the bars appeared
+"in the correct order" was wrong: the panel is mounted upside down, so they
+were reversed and their labels were at the top, inverted. Vertical bars are
+symmetric top to bottom, so the pattern's own check — "the bar labelled red is
+red" — passes on an upside-down panel. Phase 5 found this and added a
+`corners` pattern that cannot be fooled the same way.
 
 - `protocol`: the wire format as pure functions, no I/O — 27 packets of 4,105
   bytes per frame, derived from the panel's geometry rather than hard-coded.
@@ -63,8 +71,10 @@ serial link at 10000 baud.
 **Brightness** is deliberately absent: upstream exposes no such command and
 none is documented, so this package does not invent one.
 
-Bring-up corrected three things no document got right, and the first is the
-reason this phase took a while:
+Bring-up corrected several things no document got right, and the first is the
+reason this phase took a while. One of the corrections was itself wrong and is
+struck through below — left in place rather than deleted, because the way it
+went wrong is the useful part:
 
 - **`hidraw` cannot drive this panel.** Its HID interface declares 64-byte
   output reports, so a 4,104-byte chunk cannot travel that path however it is
@@ -72,10 +82,22 @@ reason this phase took a while:
   failure is silent, which is what made it expensive. Both independent
   implementations of this protocol use libusb for exactly this reason, and
   `UsbfsTransport` does the same thing with no library at all.
-- **The display is not interface 1.** Upstream hard-codes it; the S1 has no
-  interface 1. Transports now choose by capability instead.
+- **~~The display is not interface 1.~~** This correction was itself wrong, and
+  Phase 5 retracted it. The S1 *does* publish an interface 1, and it is the
+  display: it carries the only bare OUT endpoint and has no kernel driver bound
+  to it. The reason it looked absent is the item above — the original survey
+  enumerated through `hidraw`, which only shows interfaces `usbhid` has claimed,
+  and interface 1 is precisely the one it has not. So upstream's hard-coded
+  number was right after all. Choosing by capability is still the better rule —
+  it does not depend on the number being 1 — but it was arrived at from a false
+  premise.
 - **The heartbeat is not optional.** Without one a second, the firmware paints
-  its own disconnection banner over the frame.
+  its own disconnection banner over the frame. Independently reproduced in
+  Phase 5, where the `frame` subcommand's missing keep-alive made working
+  hardware look broken.
+- **The panel is mounted upside down.** Found in Phase 5. The frame has to be
+  turned half a revolution before encoding; the panel's own orientation
+  command does nothing at any value.
 
 See [the package README](../packages/ht32/README.md) for the reconstructed wire
 protocol and what each source got wrong.
