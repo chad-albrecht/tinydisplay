@@ -18,6 +18,7 @@ import ast
 import importlib.util
 import json
 import re
+import subprocess
 import tomllib
 from pathlib import Path
 from typing import Any
@@ -239,6 +240,28 @@ class TestBrandImages:
             corner = image.getpixel((0, 0))
             assert isinstance(corner, tuple)
             assert corner[3] == 0
+
+    def test_the_brand_images_are_committed(self) -> None:
+        """A file on disk is not a file in the release.
+
+        These PNGs were built, tested, tagged and shipped twice without ever
+        being committed. `*.png` is gitignored so that example renders stay out
+        of the tree, `git add -A` skipped them without a word, and the size
+        check above passed the whole time because it asks the filesystem. The
+        release tarball is built from git, so git is what has to be asked.
+        """
+        result = subprocess.run(
+            ["git", "ls-files", "--", "custom_components/tinydisplay/brand"],
+            capture_output=True,
+            text=True,
+            cwd=REPO_ROOT,
+            check=False,
+        )
+        if result.returncode != 0:
+            pytest.skip("not a git checkout")
+
+        tracked = {Path(line).name for line in result.stdout.split() if line}
+        assert tracked >= {"icon.png", "icon@2x.png", "dark_icon.png", "dark_icon@2x.png"}
 
     def test_the_generator_is_kept(self) -> None:
         # The icons are drawn with the project's own canvas rather than exported

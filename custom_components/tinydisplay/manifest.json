@@ -13,5 +13,5 @@
     "tinydisplay-homeassistant==0.1.0",
     "tinydisplay-ht32==0.1.0"
   ],
-  "version": "0.1.2"
+  "version": "0.1.3"
 }
