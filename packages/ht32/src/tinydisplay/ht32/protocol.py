@@ -168,9 +168,11 @@ class SubCommand(IntEnum):
 #: orientation packet at all, so what had been confirmed was the panel's
 #: power-on state and not these values.
 #:
-#: Sweeping 0x00 through 0x04 against a real panel changed nothing, so the
-#: command appears to be unimplemented in this firmware. The S1's panel is
-#: mounted upside down and the host has to compensate -- see
+#: Sweeping 0x00 through 0x04 against a real panel changed nothing beyond these
+#: two, and the upstream Rust implementation says the same in as many words:
+#: the hardware supports landscape (0x01) and portrait (0x02) and nothing else,
+#: and upside-down variants are achieved by rotating in software. The S1's
+#: panel is mounted upside down, so the host has to compensate -- see
 #: :class:`~tinydisplay.ht32.driver.HT32Driver`'s ``rotate_180``.
 ORIENTATION_LANDSCAPE: Final = 0x01
 ORIENTATION_PORTRAIT: Final = 0x02

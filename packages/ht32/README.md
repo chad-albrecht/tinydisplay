@@ -73,6 +73,16 @@ async with LedController() as leds:
     await leds.set_theme(LedTheme.BREATHING, intensity=4, speed=2)
 ```
 
+**The strip cannot be set to a colour**, and that is the hardware rather than a
+missing feature. The CH340 is only a UART bridge; the LEDs are driven by a
+custom microcontroller on the S1's motherboard, whose firmware exposes five
+effects and no colour channel. Confirmed three ways: theme bytes `0x06`-`0x0C`
+produce no response on real hardware, the upstream implementation offers the
+same five and states that no RGB values are supported, and the board's design
+puts the colours inside a chip nothing here talks to. `LedTheme.COLORS` cycles
+solid colours, so a given colour exists as a phase of an animation rather than
+a state you can select.
+
 ## Layout
 
 | Module | Responsibility |

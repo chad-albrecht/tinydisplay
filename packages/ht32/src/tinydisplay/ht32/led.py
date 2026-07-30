@@ -22,6 +22,20 @@ that the firmware counts backwards.
 10,000 baud is not a standard rate, and the bridge is slow enough that bytes
 must be paced: upstream waits 5 ms between them, and so does this.
 
+**There is no way to set a colour.** The packet has one byte for the effect and
+none for colour, and that is a property of the hardware rather than a gap in
+this reconstruction. The CH340 is only a UART bridge; behind it sits a custom
+microcontroller on the S1's motherboard that owns the LEDs, and its firmware
+exposes five effects and nothing else. Three lines of evidence agree: sweeping
+theme bytes 0x06 through 0x0C against a real strip produced no response at all,
+the upstream Rust implementation offers the same five and states outright that
+no RGB or custom colour values are supported, and the board's own design puts
+the colours inside a chip we do not talk to.
+
+The closest thing to a single colour is :attr:`LedTheme.COLORS`, which cycles
+through solid colours -- so any given colour exists as a phase of an animation
+rather than as a state that can be selected.
+
 Example:
     >>> from tinydisplay.ht32.led import LedTheme, build_led_packet
     >>> list(build_led_packet(LedTheme.BREATHING, intensity=5, speed=1))
@@ -80,7 +94,12 @@ CH340_PRODUCT_ID: Final = 0x7523
 
 
 class LedTheme(IntEnum):
-    """Lighting effect."""
+    """Lighting effect.
+
+    These five are the whole command set, not the subset anyone has decoded so
+    far -- see the module docstring. ``COLORS`` cycles solid colours, which is
+    as close as this hardware comes to being told to show one.
+    """
 
     RAINBOW = 0x01
     BREATHING = 0x02

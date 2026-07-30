@@ -182,6 +182,14 @@ class HT32Driver(DisplayDriver):
         buffer that is exactly reversing the sequence of pixels -- so this
         costs one reversed view of an array rather than an image rotation, and
         it is pinned to Pillow's own ``rotate(180)`` by a test.
+
+        Found empirically here, and corroborated afterwards: the upstream Rust
+        implementation carries an ``Orientation`` enum whose upside-down
+        variants are documented as *software* rotation because "the hardware
+        only supports two orientations", and implements that rotation by
+        reversing the buffer's elements. Two independent reconstructions
+        arriving at the same trick is a good sign the trick is the hardware's
+        rather than ours.
         """
         data = super().encode(canvas)
         if not self._rotate_180:
