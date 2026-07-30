@@ -81,53 +81,102 @@ throws them away.
 
 ## Installation
 
-### Dependencies come first
+> **Do step 1 before step 2.** HACS copies the integration; it does **not**
+> install Python requirements — Home Assistant does that itself, from PyPI, and
+> the packages this integration needs are not published there yet. Installing
+> HACS-first is recoverable (do step 1, then restart) but it fails once with a
+> confusing error on the way.
 
-Home Assistant installs a `manifest.json` requirement with pip, from PyPI.
-**These packages are not published yet**, so that step fails and the
-integration will not load. Until they are, build and install them by hand.
+Commands below are for **Home Assistant OS or Container**, run from the
+*Advanced SSH & Web Terminal* add-on with Protection Mode off. Substitute the
+current release for `v0.1.0`.
 
-On a machine with the repository checked out:
-
-```bash
-uv build --all-packages          # wheels land in dist/
-```
-
-Copy `dist/tinydisplay_homeassistant-*.whl`, `dist/tinydisplay_core-*.whl`,
-`dist/tinydisplay_widgets-*.whl` and `dist/tinydisplay_ht32-*.whl` to the Home
-Assistant machine, then from the SSH add-on:
+### Step 1 — the Python packages
 
 ```bash
-docker exec homeassistant pip install --target /config/deps /path/to/*.whl
+cd /config
+wget -qO td.tar.gz https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.1.0.tar.gz
+tar xzf td.tar.gz
+
+docker exec homeassistant pip install --target /config/deps --upgrade --no-deps \
+  /config/tinydisplay-0.1.0/packages/core \
+  /config/tinydisplay-0.1.0/packages/widgets \
+  /config/tinydisplay-0.1.0/packages/ht32 \
+  /config/tinydisplay-0.1.0/packages/homeassistant
 ```
 
-`/config/deps` is added to Home Assistant's import path at startup and lives on
-the config volume, so it survives a Core update — which a plain `pip install`
-into the container does not. That is the right target for Home Assistant OS and
-Container installs; a Supervised or Core-in-a-venv install resolves imports
-from its virtualenv instead, so install into that.
+Installing from source rather than copying files is deliberate: pip builds each
+package and writes real `.dist-info` metadata, which is what Home Assistant's
+requirement check reads. A bare file copy imports fine and still fails setup.
 
-Note that `tinydisplay-ht32` is pinned without its `[hid]` extra. That is
-deliberate — the raw-USB transport needs nothing installed — but it means the
-hidapi fallback is unavailable, so a machine where usbfs is not reachable
-fails with a clear message rather than silently taking a path that does not
-drive this panel anyway.
+`--no-deps` skips numpy, Pillow and PyYAML, which Home Assistant already ships,
+and stops pip hunting PyPI for `tinydisplay-core`, which is not there. Check
+first if you are unsure:
 
-### HACS
+```bash
+docker exec homeassistant python3 -c "import numpy, PIL, yaml; print(numpy.__version__, PIL.__version__, yaml.__version__)"
+```
 
-1. Add `https://github.com/chad-albrecht/tinydisplay` as a custom repository,
-   category **Integration**.
-2. Install **TinyDisplay**.
-3. Restart Home Assistant.
-4. **Settings → Devices & Services → Add Integration → TinyDisplay.**
+Confirm the install took, with Home Assistant not yet involved:
 
-### Manually
+```bash
+docker exec -e PYTHONPATH=/config/deps homeassistant python3 -c "
+from tinydisplay.homeassistant import Dashboard
+d = Dashboard.load('/config/tinydisplay-0.1.0/examples/ha_dashboard.yaml')
+print('parsed OK:', d); print('entities:', sorted(d.entity_ids))
+"
+```
+
+A `Dashboard(...)` line means the parser, the templating, the widget build and
+the theme quantisation all work in your container. `PYTHONPATH` is only needed
+for this manual check — Home Assistant puts `/config/deps` on the path itself.
+
+**Where `/config/deps` applies.** It is on Home Assistant's import path at
+startup and lives on the config volume, so it survives a Core update, which a
+plain `pip install` into the container does not. A Supervised or
+Core-in-a-venv install resolves imports from its virtualenv instead, so install
+into that.
+
+### Step 2 — the integration, via HACS
+
+1. **HACS → ⋮ → Custom repositories**
+2. Repository `https://github.com/chad-albrecht/tinydisplay`, type
+   **Integration** → **Add**
+3. Find **TinyDisplay** in HACS → **Download**
+4. Restart Home Assistant
+
+If you previously copied `custom_components/tinydisplay/` by hand, delete it
+first so HACS owns the directory.
+
+### Step 3 — configure
+
+```bash
+cp /config/tinydisplay-0.1.0/examples/ha_dashboard.yaml /config/
+```
+
+**Settings → Devices & Services → Add Integration → TinyDisplay.**
+
+### Without HACS
 
 Copy `custom_components/tinydisplay/` into your Home Assistant `config/`
-directory and restart.
+directory and restart. Step 1 is still required.
 
-Either route still needs the wheels installed first, as above. HACS copies the
-component; it does not solve the requirement.
+### If setup says "Requirements for tinydisplay not found"
+
+Step 1 did not take. The metadata is what Home Assistant reads, so check it
+exists rather than checking the import works:
+
+```bash
+docker exec homeassistant ls /config/deps | grep dist-info
+```
+
+Four `tinydisplay_*-0.1.0.dist-info` directories should be listed.
+
+`tinydisplay-ht32` is pinned without its `[hid]` extra, deliberately — the
+raw-USB transport needs nothing installed. The consequence is that the hidapi
+fallback is unavailable, so a machine where usbfs is unreachable fails with a
+clear message rather than silently taking a path that cannot drive this panel
+anyway.
 
 ## Setup
 

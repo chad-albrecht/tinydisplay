@@ -140,6 +140,27 @@ canvas.save("preview.png")
 [`examples/dashboard.py`](examples/dashboard.py) is a fuller walkthrough: custom
 widgets, a container, and a frame pushed through a driver at HT32 resolution.
 
+## Installing in Home Assistant
+
+**Two steps, and the order matters.** HACS copies the integration; it does
+**not** install Python requirements. Home Assistant does that itself, from
+PyPI — and these packages are not published there yet, so a HACS-first install
+fails once on the way with a confusing error.
+
+1. **Install the Python packages** into `/config/deps` from the release
+   tarball.
+2. **Install the integration** through HACS as a custom repository.
+
+[`custom_components/tinydisplay/README.md`](custom_components/tinydisplay/README.md)
+has the exact commands, a check that confirms step 1 took before Home Assistant
+is involved, and what to do when setup reports missing requirements anyway.
+
+Before any of it, on hardware: an integration runs in Home Assistant's **Core**
+container, which cannot request the raw USB privileges an add-on can.
+[`tools/ht32_usbfs_preflight.py`](tools/ht32_usbfs_preflight.py) establishes
+whether the panel is reachable from there, and which interface the driver will
+claim. It writes nothing to the panel and is safe on a running system.
+
 ## Development
 
 Requires **Python 3.12+**.
