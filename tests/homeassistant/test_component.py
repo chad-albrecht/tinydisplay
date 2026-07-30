@@ -288,6 +288,8 @@ class TestDependencyRule:
             "collections",
             "contextlib",
             "dataclasses",
+            "pathlib",
+            "shutil",
             "homeassistant",
             "logging",
             "tinydisplay",

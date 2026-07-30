@@ -142,8 +142,16 @@ for n in ('tinydisplay-core','tinydisplay-widgets','tinydisplay-ht32','tinydispl
 "
 ```
 
-Four versions means the requirement check will pass. Then check the library
-itself loads and parses a dashboard:
+Four versions means the requirement check will pass.
+
+**Restart Home Assistant after this step, before installing the integration.**
+Home Assistant works out the user-site path and adds it to `sys.path` once, at
+startup. Packages installed while it is running are not picked up, and the
+symptom is `No module named 'tinydisplay'` in the log with
+`Config flow could not be loaded: Invalid handler specified` in the UI — which
+looks nothing like a missing restart.
+
+Then check the library itself loads and parses a dashboard:
 
 ```bash
 docker exec -e PYTHONUSERBASE=/config/deps homeassistant python3 -c "
@@ -172,11 +180,19 @@ first so HACS owns the directory.
 
 ### Step 3 — configure
 
-```bash
-cp /config/tinydisplay-0.1.0/examples/ha_dashboard.yaml /config/
-```
-
 **Settings → Devices & Services → Add Integration → TinyDisplay.**
+
+Nothing needs preparing. The flow writes a starter dashboard to
+`<config>/tinydisplay/dashboard.yaml` if you have none, preselects it, and
+preselects the panel by checking whether an HT32 is actually on the USB bus —
+so accepting the defaults and pressing **Submit** works.
+
+The starter reads only `sun.sun`, which every Home Assistant has, so the panel
+shows real moving data immediately rather than a screen of `--` placeholders.
+Edit it, or point the integration at your own file, once you have seen it work.
+
+The dashboard field lists only files that parse as a dashboard, so anything you
+can pick will load. Type a path if yours lives elsewhere.
 
 ### Without HACS
 

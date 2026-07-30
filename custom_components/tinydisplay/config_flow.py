@@ -15,11 +15,16 @@ watches is perfectly reasonable and blocking it would be obnoxious.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
 from homeassistant.core import callback
+from homeassistant.helpers.selector import (
+    SelectSelector,
+    SelectSelectorConfig,
+    SelectSelectorMode,
+)
 
 from tinydisplay.homeassistant import Dashboard, DashboardConfigError, missing_entities
 
@@ -35,8 +40,10 @@ from .const import (
     DEFAULT_MIN_INTERVAL,
     DOMAIN,
     DRIVER_HT32,
+    DRIVER_MEMORY,
     DRIVERS,
 )
+from .discovery import detect_default_driver, ensure_starter_dashboard, find_dashboards
 from .runtime import HassStateSource
 
 if TYPE_CHECKING:
@@ -44,13 +51,34 @@ if TYPE_CHECKING:
 
 _LOGGER = logging.getLogger(__name__)
 
-_USER_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_DRIVER, default=DRIVER_HT32): vol.In(DRIVERS),
-        vol.Required(CONF_DASHBOARD): str,
-        vol.Optional(CONF_SERIAL_NUMBER): str,
-    }
-)
+
+def _user_schema(*, driver: str, dashboards: list[str], suggested: str | None) -> vol.Schema:
+    """Build the form, preselecting what this machine actually has.
+
+    The dashboard field is a select with ``custom_value`` rather than a plain
+    text box: the options are files already parsed and accepted, so picking one
+    cannot fail, and anyone with a dashboard somewhere else can still type a
+    path.
+    """
+    dashboard_selector = SelectSelector(
+        SelectSelectorConfig(
+            options=dashboards,
+            custom_value=True,
+            mode=SelectSelectorMode.DROPDOWN,
+        )
+    )
+    dashboard_field = (
+        vol.Required(CONF_DASHBOARD, default=suggested)
+        if suggested
+        else vol.Required(CONF_DASHBOARD)
+    )
+    return vol.Schema(
+        {
+            vol.Required(CONF_DRIVER, default=driver): vol.In(DRIVERS),
+            dashboard_field: dashboard_selector,
+            vol.Optional(CONF_SERIAL_NUMBER): str,
+        }
+    )
 
 
 # `domain=` is how Home Assistant registers a flow class. mypy cannot see the
@@ -93,12 +121,33 @@ class TinyDisplayConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg
                     data=user_input,
                 )
 
+        # Done in the executor: writing the starter and parsing candidates both
+        # touch the filesystem, and detection reads the USB bus.
+        suggested, dashboards, driver = await self.hass.async_add_executor_job(self._survey)
+
         return self.async_show_form(
             step_id="user",
-            data_schema=_USER_SCHEMA,
+            data_schema=_user_schema(
+                driver=driver,
+                dashboards=dashboards,
+                suggested=(user_input or {}).get(CONF_DASHBOARD) or suggested,
+            ),
             errors=errors,
             description_placeholders=placeholders,
         )
+
+    def _survey(self) -> tuple[str | None, list[str], str]:
+        """Work out what to offer: a starter, the dashboards found, the panel.
+
+        Runs in the executor. Writing the starter first means it is among the
+        candidates, so a machine with nothing prepared still gets a working
+        default rather than an empty dropdown.
+        """
+        config_dir = self.hass.config.config_dir
+        starter = ensure_starter_dashboard(config_dir)
+        dashboards = find_dashboards(config_dir)
+        suggested = str(starter) if starter else (dashboards[0] if dashboards else None)
+        return (suggested, dashboards, detect_default_driver())
 
     def _warn_about_missing_entities(self, dashboard: Dashboard) -> None:
         """Log the entities a dashboard names that do not exist yet."""
@@ -155,12 +204,24 @@ class TinyDisplayOptionsFlow(OptionsFlow):
         return self.async_show_form(step_id="init", data_schema=schema)
 
 
-def _entry_title(driver: str, dashboard_path: str) -> str:
-    """A title naming both halves of what was configured.
+#: What each panel is called in the entry title. `MEMORY (dashboard.yaml)` was
+#: a debug string wearing a name's clothing; these read like something a person
+#: chose.
+_PANEL_NAMES: Final = {
+    DRIVER_HT32: "HT32 panel",
+    DRIVER_MEMORY: "Preview",
+}
 
-    The dashboard's filename rather than its full path: the path is long, and
-    someone running two panels is telling them apart by which dashboard they
-    show, not by which directory it lives in.
+
+def _entry_title(driver: str, dashboard_path: str) -> str:
+    """Name the entry after the panel, and the dashboard only when it helps.
+
+    Someone running one panel does not need the filename in the title at all,
+    and someone running two is telling them apart by which dashboard they show
+    -- so the stem is included only when it is not the starter everyone gets.
     """
-    name = dashboard_path.replace("\\", "/").rsplit("/", 1)[-1]
-    return f"{driver.upper()} ({name})"
+    panel = _PANEL_NAMES.get(driver, driver.upper())
+    stem = dashboard_path.replace("\\", "/").rsplit("/", 1)[-1].removesuffix(".yaml")
+    if stem in {"dashboard", ""}:
+        return panel
+    return f"{panel} - {stem.replace('_', ' ')}"

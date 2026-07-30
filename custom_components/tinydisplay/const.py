@@ -54,6 +54,25 @@ DEFAULT_MIN_INTERVAL: Final = 0.2
 DEFAULT_MAX_INTERVAL: Final = 30.0
 DEFAULT_LANDSCAPE: Final = True
 
+#: Shipped with the integration and copied into the config directory the first
+#: time setup runs, so that a fresh install has something valid to point at.
+#: It reads only ``sun.sun``, which every Home Assistant has.
+STARTER_DASHBOARD: Final = "starter_dashboard.yaml"
+
+#: Where the starter is copied to. A directory of its own, because a dashboard
+#: is a document a person will edit and come back to, not a dotfile.
+DASHBOARD_DIR: Final = "tinydisplay"
+DASHBOARD_NAME: Final = "dashboard.yaml"
+
+#: Directories searched for dashboards to offer in the config flow, relative to
+#: the config directory. Only the top level of each: a recursive walk of a
+#: Home Assistant config is slow and mostly finds other integrations' YAML.
+DASHBOARD_SEARCH_DIRS: Final = ("", DASHBOARD_DIR)
+
+#: How many candidate files to try parsing before giving up. A guard against a
+#: config directory with hundreds of YAML files, not a meaningful limit.
+MAX_DASHBOARD_CANDIDATES: Final = 200
+
 #: Panel size used by the memory driver, which has no size of its own. Chosen
 #: to match the HT32 so that a dashboard checked without hardware is checked at
 #: the size it will actually be drawn at.

@@ -1,0 +1,62 @@
+# TinyDisplay starter dashboard.
+#
+# Written to <config>/tinydisplay/dashboard.yaml the first time the integration
+# is set up, so that setup works with nothing prepared in advance.
+#
+# It deliberately reads only `sun.sun`, which exists on every Home Assistant
+# install and needs no configuration -- so the panel shows real, moving data
+# immediately rather than a screen full of "--" placeholders. Point the
+# integration at your own file, or edit this one, once you know it works.
+#
+# The format is documented at:
+#   https://github.com/chad-albrecht/tinydisplay/blob/main/packages/homeassistant/README.md
+
+theme: midnight
+
+root:
+  type: stack
+  axis: vertical
+  spacing: 6
+  padding: 10
+  children:
+    # Header: a title on the left, a lamp on the right that follows the state.
+    - type: stack
+      axis: horizontal
+      size: 24
+      spacing: 6
+      children:
+        - type: label
+          text: Sun elevation
+          color: muted
+          valign: middle
+          wrap: false
+
+        - type: icon
+          size: 20
+          icon: circle
+          thickness: 3
+          entity: sun.sun
+          color:
+            above_horizon: warning
+            below_horizon: muted
+            default: danger
+
+    # The readout. Shrinks to fit rather than overflowing, because the value
+    # crosses zero and gains a minus sign.
+    - type: label
+      weight: 2
+      text: "{{ sun.sun.elevation | round(1) }} deg"
+      color: accent
+      font_size: 46
+      align: center
+      valign: middle
+      wrap: false
+      shrink_to_fit: true
+
+    - type: label
+      size: 22
+      text: "{{ sun.sun | replace(_, ' ') | title }}"
+      color: muted
+      align: center
+      wrap: false
+      shrink_to_fit: true

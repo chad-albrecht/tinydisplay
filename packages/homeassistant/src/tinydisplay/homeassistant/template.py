@@ -124,6 +124,16 @@ def _filter_default(value: Any, args: Sequence[Any]) -> Any:
     return args[0] if value is None else value
 
 
+def _filter_replace(value: Any, args: Sequence[Any]) -> Any:
+    """Substitute one piece of text for another.
+
+    Present because Home Assistant's state strings are full of underscores --
+    ``above_horizon``, ``not_home``, ``heat_cool`` -- and a panel showing
+    ``Above_Horizon`` looks like a bug rather than a state.
+    """
+    return None if value is None else str(value).replace(str(args[0]), str(args[1]))
+
+
 def _text_filter(function: Callable[[str], str]) -> Callable[[Any, Sequence[Any]], Any]:
     """Adapt a string method into a filter that skips missing values."""
 
@@ -156,6 +166,7 @@ FILTERS: Final[dict[str, _FilterSpec]] = {
     "title": _FilterSpec(_text_filter(str.title)),
     "capitalize": _FilterSpec(_text_filter(str.capitalize)),
     "strip": _FilterSpec(_text_filter(str.strip)),
+    "replace": _FilterSpec(_filter_replace, min_args=2, max_args=2),
     "default": _FilterSpec(_filter_default, min_args=1, max_args=1, handles_missing=True),
 }
 

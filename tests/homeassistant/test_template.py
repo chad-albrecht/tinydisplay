@@ -253,3 +253,18 @@ class TestParseErrors:
         # different mistake from writing no arguments at all.
         with pytest.raises(TemplateError, match="empty filter argument"):
             Template.parse("{{ sensor.a | default(1,) }}")
+
+    def test_replace_tidies_underscored_states(self) -> None:
+        # Home Assistant's state strings are full of underscores, and a panel
+        # showing "Above_Horizon" reads as a bug rather than a state.
+        states = StaticStateSource({"sun.sun": "above_horizon"})
+        template = Template.parse("{{ sun.sun | replace(_, ' ') | title }}")
+        assert template.render(states) == "Above Horizon"
+
+    def test_replace_needs_both_arguments(self) -> None:
+        with pytest.raises(TemplateError, match="takes between 2 and 2"):
+            Template.parse("{{ sensor.a | replace(_) }}")
+
+    def test_replace_leaves_a_missing_value_missing(self) -> None:
+        rendered = Template.parse("{{ sensor.gone | replace(a, b) }}").render(StaticStateSource())
+        assert rendered == UNAVAILABLE_TEXT
