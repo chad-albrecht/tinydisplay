@@ -25,6 +25,8 @@ from typing import Any
 
 import pytest
 
+from tinydisplay import homeassistant as library
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPONENT = REPO_ROOT / "custom_components" / "tinydisplay"
 PACKAGES = REPO_ROOT / "packages"
@@ -168,6 +170,22 @@ class TestManifest:
         )
         expected = f"{distribution}=={pyproject['project']['version']}"
         assert expected in manifest["requirements"]
+
+    def test_the_pin_matches_the_library_that_will_be_imported(
+        self, manifest: dict[str, Any]
+    ) -> None:
+        """The pin, the package version and ``__version__`` must all agree.
+
+        These are three places the same number lives, and the component runs
+        against whichever library is *installed* -- which HACS never updates,
+        because HACS only copies custom_components/. A component shipped
+        depending on a library feature, with the pin left at the older version,
+        satisfies Home Assistant's requirement check and then dies with a
+        TypeError inside the render task. That happened: `run_dashboard` gained
+        an `on_frame` argument, the pin stayed at 0.1.0, and the panel went
+        dark behind a config entry that reported itself healthy.
+        """
+        assert f"tinydisplay-homeassistant=={library.__version__}" in manifest["requirements"]
 
 
 class TestTranslations:

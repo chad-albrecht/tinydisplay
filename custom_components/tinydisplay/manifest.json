@@ -10,8 +10,8 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/chad-albrecht/tinydisplay/issues",
   "requirements": [
-    "tinydisplay-homeassistant==0.1.0",
+    "tinydisplay-homeassistant==0.2.0",
     "tinydisplay-ht32==0.1.0"
   ],
-  "version": "0.1.3"
+  "version": "0.1.4"
 }
