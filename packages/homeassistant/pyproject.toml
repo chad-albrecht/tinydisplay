@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     # Layout, labels, gauges and theming -- what a dashboard is built from.
-    "tinydisplay-widgets",
+    "tinydisplay-widgets>=0.1,<0.2",
     # Dashboard definitions are YAML. Home Assistant already ships PyYAML, so
     # this costs nothing in the environment this package actually runs in.
     "pyyaml>=6.0",

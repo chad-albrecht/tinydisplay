@@ -24,7 +24,7 @@ classifiers = [
 ]
 dependencies = [
     # The rendering engine, the DisplayDriver contract and RGB565 packing.
-    "tinydisplay-core",
+    "tinydisplay-core>=0.1,<0.2",
     # Frame decoding and nearest-neighbour upscaling, vectorised.
     "numpy>=1.26",
     # ImageTk bridges a decoded frame into a Tk widget.

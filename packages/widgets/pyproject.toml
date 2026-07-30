@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     # Canvas, Color, geometry and the Widget contract.
-    "tinydisplay-core",
+    "tinydisplay-core>=0.1,<0.2",
 ]
 
 [project.urls]

@@ -1,0 +1,75 @@
+name: Release
+
+# Publishing to PyPI is what makes the integration installable the ordinary
+# way. Home Assistant installs a manifest requirement itself, from PyPI, and
+# compares the installed version against the pin -- so once these packages are
+# there, a HACS update that needs a newer library gets one automatically.
+# Until then every library change means a hand reinstall on the appliance, and
+# forgetting that has already taken a panel down once.
+
+on:
+  release:
+    types: [published]
+  # Building on demand is useful for checking the artefacts without cutting a
+  # release. This path never publishes; see the `if` on the publish job.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install uv
+        # Pinned to an exact tag: setup-uv publishes no floating major tag
+        # beyond v7, so `@v9` does not resolve.
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: "**/pyproject.toml"
+
+      - name: Build every package
+        run: uv build --all-packages
+
+      - name: Check the metadata
+        # A wheel PyPI will reject is better found here than half way through
+        # an upload, when some packages have already gone out.
+        run: uvx twine check --strict dist/*
+
+      - name: Report what was built
+        run: ls -l dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tinydisplay-core
+    permissions:
+      # Trusted publishing: PyPI verifies a short-lived OIDC token issued to
+      # this workflow, so there is no API token to store, rotate or leak.
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: distributions
+          path: dist/
+
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          # The packages version independently -- a release that only changes
+          # tinydisplay-homeassistant still rebuilds tinydisplay-core at its
+          # existing version. Skipping what is already published is the normal
+          # state of affairs here, not an error worth failing a release over.
+          skip-existing: true
