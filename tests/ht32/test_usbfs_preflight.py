@@ -61,6 +61,46 @@ def make_device(
     return entry
 
 
+def make_interface(
+    device: Path,
+    number: int,
+    *,
+    endpoints: list[tuple[str, str, str]],
+) -> Path:
+    """Add an interface with endpoints, as sysfs presents them.
+
+    The kernel names these ``<device>:<config>.<interface>``, which contains a
+    colon that Windows cannot create. Both implementations match on the
+    ``bInterfaceNumber`` attribute rather than the directory name, so a
+    portable name exercises the same path.
+    """
+    entry = device / f"iface{number}"
+    entry.mkdir(parents=True)
+    (entry / "bInterfaceNumber").write_text(f"{number:02x}", encoding="ascii")
+    (entry / "bInterfaceClass").write_text("03", encoding="ascii")
+    for index, (address, attributes, packet) in enumerate(endpoints):
+        ep = entry / f"ep_{index:02d}"
+        ep.mkdir()
+        (ep / "bEndpointAddress").write_text(address, encoding="ascii")
+        (ep / "bmAttributes").write_text(attributes, encoding="ascii")
+        (ep / "wMaxPacketSize").write_text(packet, encoding="ascii")
+    return entry
+
+
+def make_panel_like_the_s1(root: Path) -> Path:
+    """The interface layout the AceMagic S1 actually reports.
+
+    Three HID interfaces: an IN-only one, a bare OUT one with no kernel driver
+    bound, and one with both. Taken from a real ``ht32_usbfs_preflight`` run on
+    Home Assistant OS 18.1, which is what makes it worth pinning.
+    """
+    device = make_device(root, "1-8", vendor="04d9", product="fd01", bus=1, devnum=6)
+    make_interface(device, 0, endpoints=[("81", "03", "0040")])
+    make_interface(device, 1, endpoints=[("02", "03", "0040")])
+    make_interface(device, 2, endpoints=[("04", "03", "0040"), ("83", "03", "0040")])
+    return device
+
+
 class TestConstantsAgree:
     def test_the_file_exists_where_the_docs_say(self) -> None:
         assert PREFLIGHT_PATH.is_file()
@@ -148,3 +188,75 @@ class TestDiscovery:
     ) -> None:
         monkeypatch.setattr(preflight, "USB_DEVICES", tmp_path / "not-there")
         assert preflight.find_panel() is None
+
+
+class TestEndpointSelection:
+    """The preflight has to predict the interface the driver will claim.
+
+    Choosing the wrong one is a failure this panel has already produced, and it
+    presents as a blank screen rather than an error -- so a preflight that said
+    READY while the driver went on to claim a keypad would be worse than no
+    preflight at all.
+    """
+
+    def test_reads_endpoints_the_way_the_driver_does(
+        self, preflight: ModuleType, tmp_path: Path
+    ) -> None:
+        device = make_panel_like_the_s1(tmp_path / "devices")
+
+        theirs = usbfs.usb_interfaces(device)
+        ours = preflight.read_interfaces(device)
+
+        assert set(theirs) == set(ours)
+        for number, endpoints in theirs.items():
+            assert [(e.address, e.kind, e.packet_size) for e in endpoints] == ours[number]
+
+    def test_picks_the_same_endpoint_as_the_driver(
+        self, preflight: ModuleType, tmp_path: Path
+    ) -> None:
+        device = make_panel_like_the_s1(tmp_path / "devices")
+
+        theirs = usbfs.find_output_endpoint(usbfs.usb_interfaces(device))
+        ours = preflight.find_output_endpoint(preflight.read_interfaces(device))
+
+        assert theirs == ours
+
+    def test_picks_the_bare_out_interface_on_the_s1(
+        self, preflight: ModuleType, tmp_path: Path
+    ) -> None:
+        # if01 carries the only OUT endpoint that is not sharing an interface
+        # with an IN one, and ties on packet size keep the lowest interface.
+        device = make_panel_like_the_s1(tmp_path / "devices")
+        assert preflight.find_output_endpoint(preflight.read_interfaces(device)) == (1, 0x02)
+
+    def test_in_endpoints_cannot_carry_frames(self, preflight: ModuleType) -> None:
+        assert not preflight.can_carry_frames(0x81, preflight.TRANSFER_INTERRUPT)
+        assert preflight.can_carry_frames(0x02, preflight.TRANSFER_INTERRUPT)
+
+    def test_control_endpoints_cannot_carry_frames(self, preflight: ModuleType) -> None:
+        # Control (0) and isochronous (1) endpoints exist on plenty of devices
+        # and cannot take a frame.
+        assert not preflight.can_carry_frames(0x02, 0)
+        assert not preflight.can_carry_frames(0x02, 1)
+        assert preflight.can_carry_frames(0x02, preflight.TRANSFER_BULK)
+
+    def test_the_largest_packet_wins(self, preflight: ModuleType, tmp_path: Path) -> None:
+        device = make_device(
+            tmp_path / "devices", "1-8", vendor="04d9", product="fd01", bus=1, devnum=6
+        )
+        make_interface(device, 0, endpoints=[("02", "03", "0008")])
+        make_interface(device, 1, endpoints=[("04", "03", "0040")])
+
+        chosen = preflight.find_output_endpoint(preflight.read_interfaces(device))
+        assert chosen == (1, 0x04)
+        assert chosen == usbfs.find_output_endpoint(usbfs.usb_interfaces(device))
+
+    def test_a_device_with_no_out_endpoint_selects_nothing(
+        self, preflight: ModuleType, tmp_path: Path
+    ) -> None:
+        device = make_device(
+            tmp_path / "devices", "1-8", vendor="04d9", product="fd01", bus=1, devnum=6
+        )
+        make_interface(device, 0, endpoints=[("81", "03", "0040")])
+
+        assert preflight.find_output_endpoint(preflight.read_interfaces(device)) is None
