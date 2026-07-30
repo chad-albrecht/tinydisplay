@@ -7,14 +7,21 @@ kind of detail that works by accident until it does not.
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from tinydisplay.ht32 import LedController, LedError, LedTheme, RecordingLedTransport
 from tinydisplay.ht32.led import (
     DEFAULT_BAUD_RATE,
+    DEFAULT_HOLD_HZ,
+    HELD_COLOURS,
+    INTER_BYTE_DELAY,
+    LED_PACKET_SIZE,
     LED_SIGNATURE,
     LEVEL_MAX,
     LEVEL_MIN,
+    MAX_HOLD_HZ,
     LedTransport,
     SerialLedTransport,
     build_led_packet,
@@ -169,3 +176,106 @@ class TestSummary:
 
     def test_handles_no_packets(self) -> None:
         assert led_packet_summary([]) == "0 LED packets"
+
+
+class TestHoldTheme:
+    """Holding an effect at its first frame, which is how a solid colour is made.
+
+    The hardware has no colour command; every animated effect simply starts
+    from a fixed colour, so restarting it faster than it advances pins it
+    there. The technique comes from ``fsncps/acemagic-ledctl``.
+    """
+
+    async def test_writes_the_same_packet_repeatedly(self) -> None:
+        transport = RecordingLedTransport()
+        async with LedController(transport=transport) as leds:
+            writes = await leds.hold_theme(LedTheme.COLORS, max_writes=5)
+
+        assert writes == 5
+        assert len(transport.packets) == 5
+        # One packet, sent over and over -- the restart is the whole mechanism.
+        assert len(set(transport.packets)) == 1
+        assert transport.packets[0] == build_led_packet(
+            LedTheme.COLORS, intensity=3, speed=LEVEL_MIN
+        )
+
+    async def test_the_held_theme_is_reported(self) -> None:
+        transport = RecordingLedTransport()
+        async with LedController(transport=transport) as leds:
+            await leds.hold_theme(LedTheme.RAINBOW, max_writes=2)
+            assert leds.theme is LedTheme.RAINBOW
+
+    async def test_speed_defaults_to_the_slowest(self) -> None:
+        # The point is to stop the animation, not to run it quickly.
+        transport = RecordingLedTransport()
+        async with LedController(transport=transport) as leds:
+            await leds.hold_theme(LedTheme.COLORS, max_writes=1)
+        assert transport.packets[0][3] == LEVEL_MAX + 1 - LEVEL_MIN
+
+    async def test_intensity_is_honoured(self) -> None:
+        transport = RecordingLedTransport()
+        async with LedController(transport=transport) as leds:
+            await leds.hold_theme(LedTheme.COLORS, intensity=5, max_writes=1)
+        assert transport.packets[0] == build_led_packet(
+            LedTheme.COLORS, intensity=5, speed=LEVEL_MIN
+        )
+
+    async def test_it_runs_at_about_the_requested_rate(self) -> None:
+        transport = RecordingLedTransport()
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        async with LedController(transport=transport) as leds:
+            await leds.hold_theme(LedTheme.COLORS, hz=50.0, max_writes=4)
+        # Three intervals between four writes, and the loop must not sleep
+        # after the last one.
+        assert loop.time() - started >= 3 / 50.0
+
+    async def test_it_can_be_cancelled(self) -> None:
+        # The colour lasts as long as the loop does, so cancelling is how a
+        # caller stops -- there is no other exit when max_writes is None.
+        transport = RecordingLedTransport()
+        async with LedController(transport=transport) as leds:
+            task = asyncio.create_task(leds.hold_theme(LedTheme.COLORS))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+        assert transport.packets
+
+    @pytest.mark.parametrize("hz", [0.0, -1.0])
+    async def test_a_non_positive_rate_is_rejected(self, hz: float) -> None:
+        async with LedController(transport=RecordingLedTransport()) as leds:
+            with pytest.raises(LedError, match="hz must be positive"):
+                await leds.hold_theme(LedTheme.COLORS, hz=hz)
+
+    async def test_a_rate_beyond_the_link_is_rejected(self) -> None:
+        # Five bytes with INTER_BYTE_DELAY between them is 20 ms, so the bridge
+        # cannot take more than fifty packets a second however hard we ask.
+        async with LedController(transport=RecordingLedTransport()) as leds:
+            with pytest.raises(LedError, match="must not exceed"):
+                await leds.hold_theme(LedTheme.COLORS, hz=MAX_HOLD_HZ + 1)
+
+    async def test_the_ceiling_itself_is_allowed(self) -> None:
+        transport = RecordingLedTransport()
+        async with LedController(transport=transport) as leds:
+            assert await leds.hold_theme(LedTheme.COLORS, hz=MAX_HOLD_HZ, max_writes=1) == 1
+
+    async def test_a_bad_level_still_raises(self) -> None:
+        async with LedController(transport=RecordingLedTransport()) as leds:
+            with pytest.raises(LedError, match="intensity"):
+                await leds.hold_theme(LedTheme.COLORS, intensity=9, max_writes=1)
+
+    def test_the_default_rate_is_under_the_ceiling(self) -> None:
+        # A little headroom, so a slow moment does not become a visible flicker.
+        assert DEFAULT_HOLD_HZ < MAX_HOLD_HZ
+
+    def test_the_ceiling_matches_the_pacing(self) -> None:
+        assert pytest.approx(1.0 / ((LED_PACKET_SIZE - 1) * INTER_BYTE_DELAY)) == MAX_HOLD_HZ
+        assert len(build_led_packet(LedTheme.OFF)) == LED_PACKET_SIZE
+
+    @pytest.mark.parametrize("theme", sorted(HELD_COLOURS))
+    def test_only_animated_effects_are_listed_as_holdable(self, theme: LedTheme) -> None:
+        # OFF and AUTO have no first frame to hold, and BREATHING's is a pulse
+        # rather than a colour.
+        assert theme in {LedTheme.COLORS, LedTheme.RAINBOW}
+        assert HELD_COLOURS[theme]
