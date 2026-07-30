@@ -98,16 +98,30 @@ cd /config
 wget -qO td.tar.gz https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.1.0.tar.gz
 tar xzf td.tar.gz
 
-docker exec homeassistant pip install --target /config/deps --upgrade --no-deps \
+docker exec -e PYTHONUSERBASE=/config/deps homeassistant pip install --user --no-deps \
   /config/tinydisplay-0.1.0/packages/core \
   /config/tinydisplay-0.1.0/packages/widgets \
   /config/tinydisplay-0.1.0/packages/ht32 \
   /config/tinydisplay-0.1.0/packages/homeassistant
 ```
 
-Installing from source rather than copying files is deliberate: pip builds each
-package and writes real `.dist-info` metadata, which is what Home Assistant's
-requirement check reads. A bare file copy imports fine and still fails setup.
+**Use `PYTHONUSERBASE` and `--user`, not `--target`.** This is not a style
+preference and getting it wrong wastes an evening. Home Assistant installs its
+own requirements by setting `PYTHONUSERBASE` to `<config>/deps` and running
+`pip install --user`, which lands packages in
+`<config>/deps/lib/python3.X/site-packages` — and *that* directory, not
+`<config>/deps` itself, is what it adds to `sys.path`. A `--target` install puts
+everything one level too high, somewhere Home Assistant never reads.
+
+The failure is thoroughly misleading when it happens: pip reports success, the
+`.dist-info` directories are visibly present, the modules import perfectly if
+you set `PYTHONPATH` by hand — and setup still fails with
+`RequirementsNotFound`. Every check short of the one Home Assistant actually
+performs will tell you it worked.
+
+Installing from source rather than copying files is deliberate for a related
+reason: pip builds each package and writes real `.dist-info` metadata, which is
+what the requirement check reads. A bare file copy imports fine and still fails.
 
 `--no-deps` skips numpy, Pillow and PyYAML, which Home Assistant already ships,
 and stops pip hunting PyPI for `tinydisplay-core`, which is not there. Check
@@ -117,25 +131,33 @@ first if you are unsure:
 docker exec homeassistant python3 -c "import numpy, PIL, yaml; print(numpy.__version__, PIL.__version__, yaml.__version__)"
 ```
 
-Confirm the install took, with Home Assistant not yet involved:
+Confirm the install the way Home Assistant will, with **no `PYTHONPATH`** — the
+whole point is that it resolves without one:
 
 ```bash
-docker exec -e PYTHONPATH=/config/deps homeassistant python3 -c "
+docker exec -e PYTHONUSERBASE=/config/deps homeassistant python3 -c "
+from importlib.metadata import version
+for n in ('tinydisplay-core','tinydisplay-widgets','tinydisplay-ht32','tinydisplay-homeassistant'):
+    print(' ', n, version(n))
+"
+```
+
+Four versions means the requirement check will pass. Then check the library
+itself loads and parses a dashboard:
+
+```bash
+docker exec -e PYTHONUSERBASE=/config/deps homeassistant python3 -c "
 from tinydisplay.homeassistant import Dashboard
 d = Dashboard.load('/config/tinydisplay-0.1.0/examples/ha_dashboard.yaml')
 print('parsed OK:', d); print('entities:', sorted(d.entity_ids))
 "
 ```
 
-A `Dashboard(...)` line means the parser, the templating, the widget build and
-the theme quantisation all work in your container. `PYTHONPATH` is only needed
-for this manual check — Home Assistant puts `/config/deps` on the path itself.
-
-**Where `/config/deps` applies.** It is on Home Assistant's import path at
-startup and lives on the config volume, so it survives a Core update, which a
-plain `pip install` into the container does not. A Supervised or
-Core-in-a-venv install resolves imports from its virtualenv instead, so install
-into that.
+**Where this applies.** `<config>/deps` lives on the config volume, so it
+survives a Core update — which a plain `pip install` into the container does
+not. A Supervised or Core-in-a-venv install resolves imports from its
+virtualenv instead and ignores `deps` entirely, so install into that. Check
+with `python3 -c "import sys; print(sys.prefix != sys.base_prefix)"`.
 
 ### Step 2 — the integration, via HACS
 
@@ -163,14 +185,26 @@ directory and restart. Step 1 is still required.
 
 ### If setup says "Requirements for tinydisplay not found"
 
-Step 1 did not take. The metadata is what Home Assistant reads, so check it
-exists rather than checking the import works:
+Step 1 did not take, and the overwhelmingly likely cause is a `--target`
+install putting the packages where Home Assistant does not look. Ask where it
+*does* look, then look there:
 
 ```bash
-docker exec homeassistant ls /config/deps | grep dist-info
+docker exec homeassistant sh -c 'PYTHONUSERBASE=/config/deps python3 -m site --user-site'
+docker exec homeassistant ls "$(docker exec homeassistant sh -c 'PYTHONUSERBASE=/config/deps python3 -m site --user-site')" | grep -i tinydisplay
 ```
 
-Four `tinydisplay_*-0.1.0.dist-info` directories should be listed.
+Four `tinydisplay_*-0.1.0.dist-info` directories should be listed *there*. If
+they are sitting directly in `/config/deps` instead, remove them and redo
+step 1:
+
+```bash
+docker exec homeassistant sh -c 'rm -rf /config/deps/tinydisplay /config/deps/tinydisplay_*.dist-info'
+```
+
+Do not diagnose this with `PYTHONPATH=/config/deps`. It makes the packages
+importable for that one command and proves nothing about what Home Assistant
+can see.
 
 `tinydisplay-ht32` is pinned without its `[hid]` extra, deliberately — the
 raw-USB transport needs nothing installed. The consequence is that the hidapi

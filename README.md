@@ -147,8 +147,11 @@ widgets, a container, and a frame pushed through a driver at HT32 resolution.
 PyPI — and these packages are not published there yet, so a HACS-first install
 fails once on the way with a confusing error.
 
-1. **Install the Python packages** into `/config/deps` from the release
-   tarball.
+1. **Install the Python packages** from the release tarball, using
+   `PYTHONUSERBASE=/config/deps` and `pip install --user` — the way Home
+   Assistant installs its own requirements. A `--target` install puts them one
+   directory above where it looks, and fails in a way that looks like success
+   from every angle except the one that matters.
 2. **Install the integration** through HACS as a custom repository.
 
 [`custom_components/tinydisplay/README.md`](custom_components/tinydisplay/README.md)
