@@ -1,12 +1,9 @@
 [tool.uv.workspace]
 members = ["packages/*"]
-exclude = [
-    # Not yet implemented -- these directories hold planning stubs only.
-    "packages/homeassistant",
-]
 
 [tool.uv.sources]
 tinydisplay-core = { workspace = true }
+tinydisplay-homeassistant = { workspace = true }
 tinydisplay-ht32 = { workspace = true }
 tinydisplay-simulator = { workspace = true }
 tinydisplay-widgets = { workspace = true }
@@ -14,6 +11,7 @@ tinydisplay-widgets = { workspace = true }
 [dependency-groups]
 dev = [
     "tinydisplay-core",
+    "tinydisplay-homeassistant",
     "tinydisplay-ht32",
     "tinydisplay-simulator",
     "tinydisplay-widgets",
@@ -23,6 +21,8 @@ dev = [
     "pytest-asyncio>=0.24",
     "pytest-cov>=5.0",
     "ruff>=0.6",
+    # PyYAML ships no inline types; the dashboard parser is checked strictly.
+    "types-PyYAML>=6.0",
 ]
 
 # ---------------------------------------------------------------------------
@@ -33,9 +33,11 @@ target-version = "py312"
 line-length = 100
 src = [
     "packages/core/src",
+    "packages/homeassistant/src",
     "packages/ht32/src",
     "packages/simulator/src",
     "packages/widgets/src",
+    "custom_components",
     "tests",
 ]
 
@@ -101,6 +103,14 @@ ignore = [
 "packages/ht32/src/tinydisplay/ht32/device.py" = ["PLC0415"]
 "packages/ht32/src/tinydisplay/ht32/led.py" = ["PLC0415"]
 
+# Home Assistant custom components are loaded as `custom_components.<domain>`
+# and are conventionally written with relative imports -- that is what every
+# integration in core and in HACS does, and it is what keeps the directory
+# copyable to a Home Assistant config folder. The workspace-wide ban on
+# relative imports is about keeping the library packages navigable; it does not
+# apply to a directory that is shipped as a unit.
+"custom_components/**" = ["TID252"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["tinydisplay"]
 
@@ -121,8 +131,8 @@ python_version = "3.12"
 # runs on. CI checks on Linux; this makes a developer's local run agree with it.
 platform = "linux"
 strict = true
-mypy_path = "packages/core/src:packages/ht32/src:packages/simulator/src:packages/widgets/src"
-files = ["packages", "tests", "examples"]
+mypy_path = "packages/core/src:packages/homeassistant/src:packages/ht32/src:packages/simulator/src:packages/widgets/src"
+files = ["packages", "tests", "examples", "custom_components"]
 namespace_packages = true
 explicit_package_bases = true
 warn_unreachable = true
@@ -146,20 +156,46 @@ ignore_missing_imports = true
 module = ["widget_dashboard"]
 ignore_missing_imports = true
 
+# Home Assistant is not a dependency of this workspace and never will be: it is
+# a very large install that pins much of its own tree, and requiring it to run
+# the tests would put the rendering stack behind it. The custom component is
+# still type-checked -- its use of tinydisplay is checked exactly as strictly as
+# everything else -- with Home Assistant's own symbols treated as untyped.
+[[tool.mypy.overrides]]
+module = ["homeassistant.*", "voluptuous.*"]
+ignore_missing_imports = true
+
+# The consequence of the above: HA's base classes and decorators arrive as Any,
+# so subclassing them, calling into them and applying them cannot be checked.
+# These relaxations are scoped to the component alone rather than loosened
+# globally -- the component's own use of tinydisplay is still checked strictly.
+[[tool.mypy.overrides]]
+module = ["custom_components.*"]
+disallow_subclassing_any = false
+disallow_untyped_calls = false
+disallow_untyped_decorators = false
+warn_return_any = false
+
 # ---------------------------------------------------------------------------
 # pytest
 # ---------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
+# custom_components/ is deliberately absent: importing it needs Home Assistant,
+# which is not a dependency of this workspace. What can be checked about it
+# without importing it -- the manifest, the translations, the HACS metadata --
+# is checked by tests/homeassistant/test_component.py instead.
 testpaths = [
     "tests",
     "packages/core/src",
+    "packages/homeassistant/src",
     "packages/ht32/src",
     "packages/simulator/src",
     "packages/widgets/src",
 ]
 pythonpath = [
     "packages/core/src",
+    "packages/homeassistant/src",
     "packages/ht32/src",
     "packages/simulator/src",
     "packages/widgets/src",

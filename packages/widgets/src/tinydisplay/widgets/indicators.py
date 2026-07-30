@@ -265,6 +265,17 @@ class Gauge(_Ranged):
         return self._segments
 
     @property
+    def color(self) -> Color:
+        """Colour of lit segments, below the warning threshold."""
+        return self._color
+
+    @color.setter
+    def color(self, value: Color) -> None:
+        if value != self._color:
+            self._color = value
+            self.mark_dirty()
+
+    @property
     def lit_segments(self) -> int:
         """How many blocks the current value lights.
 

@@ -217,6 +217,113 @@ unrelated five-byte protocol. It is `LedController`, not a method on
 `HT32Driver`, because the two devices fail independently: a serial bridge that
 will not open is not a reason to stop painting frames.
 
+## Why the Home Assistant layer is two things
+
+`packages/homeassistant` is a library that never imports `homeassistant`.
+`custom_components/tinydisplay` is a Home Assistant integration that does.
+
+The split is the same one the HT32 driver makes between `protocol` and
+`transport`: separate what can be tested from what cannot, then keep the second
+part small enough to read in one sitting. Everything that decides *what a
+dashboard means* — parsing, validation, templating, widget binding, when to
+repaint — lives in the library and is covered by the suite with Home Assistant
+nowhere in the environment. What is left in the component is reading
+`hass.states`, subscribing to changes, and owning a task.
+
+The seam is one method:
+
+```python
+class StateSource(Protocol):
+    def get(self, entity_id: str) -> EntityState | None: ...
+```
+
+`StaticStateSource` is a dictionary and is what the tests and the simulator
+drive dashboards with. It is the third instance of the same pattern —
+`MemoryDriver`, `RecordingHidTransport`, `NullPreviewWindow` — and it is chosen
+for the same reason: not to fake the dependency, but to make the code above it
+unable to tell that the dependency is absent.
+
+The component lives at the repository root rather than inside its package
+because HACS offers no path override for integrations. `custom_components/<domain>/`
+is where Home Assistant looks, so that is where it is.
+
+### The open question this layering does not answer
+
+An integration runs inside Home Assistant's **Core** container. The HT32 driver
+writes to `/dev/bus/usb/<bus>/<device>`, and the bring-up that proved the
+driver works ran in an **add-on** container, which had asked for `usb`, `udev`
+and `full_access` and had Protection Mode turned off. Those are add-on
+manifest capabilities. An integration cannot request them.
+
+So there is a hardware-access assumption underneath this whole layer, and it
+has to be established in Core rather than inherited from the add-on. Core does
+see `/dev/bus/usb`, which settles the fatal half. The remaining half is write
+access and detaching `usbhid`, which a directory listing cannot show, and which
+`tools/ht32_usbfs_preflight.py` exists to answer from inside the container.
+
+If write access is absent, no amount of rearranging above `DisplayDriver`
+helps — the panel would have to be driven by a process that *can* hold USB
+privileges, communicating with Home Assistant over its API instead of rendering
+in the same process.
+
+Worth being precise about what would survive that: everything below
+`custom_components/`. `packages/homeassistant` renders against a
+`StateSource`, and an add-on reading the Home Assistant websocket API would
+implement that protocol exactly as `HassStateSource` does over `hass.states`.
+The seam that makes the layer testable is the same seam that would make the
+move cheap, which is the argument for having drawn it there.
+
+### Why the dashboard templating is not Jinja
+
+Home Assistant renders templates with Jinja, and reusing that would have been
+the obvious choice. It would also have made the entire dashboard layer
+unrunnable outside Home Assistant: no parser tests in CI, no previewing a
+dashboard in the simulator, and a change to the layout of a gauge only testable
+by restarting an appliance.
+
+So the templating is placeholder substitution with a closed set of filters and
+no control flow. Parsing is strict and happens once, when the dashboard loads;
+rendering is total and happens several times a second. An unknown filter is a
+mistake in a document and raises; an entity that has gone unavailable is an
+ordinary Tuesday and renders as a placeholder.
+
+`StateSource` is where a Jinja-backed resolver would plug in if the trade ever
+becomes worth it. Nothing above it would need to change.
+
+### Why the loop takes a keep-alive rather than knowing about one
+
+The HT32's firmware paints a disconnection banner over the screen when the host
+stops checking in, so something must call `heartbeat()` about once a second.
+The render loop cannot import the driver to discover that — `homeassistant`
+sits above `core`, and `ht32` hangs off `core` as a sibling; reaching across
+would invert the stack and mean every new panel required changes at the top.
+
+So `run_dashboard` takes `keepalive` as a coroutine and schedules it against
+the same deadlines as the frames. A panel needing no keep-alive passes nothing,
+and the loop stays a loop rather than becoming a driver registry.
+
+Frames and keep-alives share one loop and one writer, exactly as they do in the
+HT32's own runner: two coroutines writing 27-packet frames into the same
+endpoint would interleave them and paint garbage, and a lock around the
+transport is a worse answer than not needing one.
+
+### Why the widget tree is built once
+
+A dashboard could be rebuilt from its description on every frame, and it would
+be simpler. It would also throw away three things that only exist because
+widgets persist: the layout cache a container keeps of what it last laid out
+into, the dirty flag that propagates from the widget that changed, and the
+sample history that is the entire content of a sparkline.
+
+So building produces a tree plus a flat tuple of *updaters* — closures that
+each know one widget, one reference into the document, and how to push the
+current value into the former from the latter. They are flat rather than a
+parallel tree because nothing needs the shape; applying them in any order gives
+the same result.
+
+A dashboard of fixed text produces zero updaters, which is worth knowing: its
+render loop does no work at all between repaints.
+
 ## Dirty tracking
 
 Widgets carry a dirty flag that propagates to ancestors on change. Nothing in

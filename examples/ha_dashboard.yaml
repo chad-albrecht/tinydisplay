@@ -1,0 +1,99 @@
+# A TinyDisplay dashboard, laid out for the HT32's 320x170 panel.
+#
+# Run it against fake entity state, with no Home Assistant and no hardware:
+#
+#     uv run python -m tinydisplay.simulator examples/ha_simulator_dashboard.py
+#
+# Or point a configured Home Assistant integration at this file. The same
+# document drives both -- that is the whole reason entity state arrives through
+# a StateSource rather than through Home Assistant directly.
+
+theme: midnight
+background: background
+
+root:
+  type: stack
+  axis: vertical
+  spacing: 6
+  padding: 8
+  children:
+    # -- Header: room name on the left, a status dot on the right ------------
+    - type: stack
+      axis: horizontal
+      size: 22
+      spacing: 6
+      children:
+        - type: label
+          text: "{{ sensor.living_room_temperature.name }}"
+          color: muted
+          valign: middle
+          wrap: false
+
+        - type: icon
+          size: 16
+          icon: circle
+          thickness: 2
+          entity: binary_sensor.front_door
+          color:
+            "on": danger
+            "off": success
+            default: muted
+
+    # -- The number the panel exists to show --------------------------------
+    - type: label
+      weight: 2
+      text: "{{ sensor.living_room_temperature | round(1) }} {{ sensor.living_room_temperature.unit_of_measurement }}"
+      color: accent
+      font_size: 44
+      align: center
+      valign: middle
+      wrap: false
+      shrink_to_fit: true
+
+    # -- Humidity over time -------------------------------------------------
+    - type: sparkline
+      size: 28
+      entity: sensor.living_room_humidity
+      color: outline
+
+    # -- Two meters, side by side -------------------------------------------
+    - type: grid
+      size: 34
+      rows: 2
+      columns: 2
+      spacing: 4
+      children:
+        - type: label
+          row: 0
+          column: 0
+          text: CPU
+          color: muted
+          valign: middle
+          wrap: false
+
+        - type: gauge
+          row: 1
+          column: 0
+          entity: sensor.processor_use
+          max: 100
+          segments: 12
+          color: success
+          track_color: surface
+          warning_at: 0.8
+          warning_color: warning
+
+        - type: label
+          row: 0
+          column: 1
+          text: "Battery {{ sensor.phone_battery | int | default(--) }}%"
+          color: muted
+          valign: middle
+          wrap: false
+
+        - type: progress
+          row: 1
+          column: 1
+          entity: sensor.phone_battery
+          max: 100
+          color: accent
+          track_color: surface

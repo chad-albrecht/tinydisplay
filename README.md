@@ -4,12 +4,20 @@
 from Home Assistant, with configurable dashboards that are not tied to any one
 device.
 
-> **Status: Phase 4, pre-alpha.** The rendering engine (`tinydisplay-core`), the
-> desktop simulator (`tinydisplay-simulator`), the HT32 panel driver
-> (`tinydisplay-ht32`) and the widget library (`tinydisplay-widgets`) are
-> implemented and tested, and the HT32 driver is **confirmed working on real
-> hardware** — an AceMagic S1's built-in panel. The Home Assistant integration
-> is not yet written.
+> **Status: Phase 5, pre-alpha.** All five packages are implemented and tested,
+> and the HT32 driver is **confirmed working on real hardware** — an AceMagic
+> S1's built-in panel, driven from an add-on container.
+>
+> The Home Assistant integration is written and has never been run inside Home
+> Assistant. Bring-up reached the panel from an **add-on**, which can request
+> raw USB privileges; an integration runs in the **Core** container and cannot.
+> Core turns out to see `/dev/bus/usb`, which settles the part that would have
+> been fatal — whether it can *write* there is what
+> [`tools/ht32_usbfs_preflight.py`](tools/ht32_usbfs_preflight.py) checks.
+> Separately, the packages the manifest pins are not on PyPI, so the
+> requirement has to be satisfied by hand.
+> [Before you start](custom_components/tinydisplay/README.md#before-you-start)
+> has both.
 
 ## Why
 
@@ -26,10 +34,14 @@ device, not the target.
 
 ## Architecture
 
-Five packages, layered so that each depends only on the ones beneath it:
+Five packages, layered so that each depends only on the ones beneath it, plus a
+Home Assistant custom component sitting on top of all of them:
 
 ```text
-   Home Assistant integration        entity state -> dashboards
+   custom_components/tinydisplay     the only code that imports homeassistant
+                |
+                v
+        Home Assistant               dashboards, entity binding, render loop
                 |
                 v
             Widgets                  gauges, readouts, charts
@@ -52,7 +64,13 @@ a canvas it never drew.
 | [`packages/simulator`](packages/simulator) | **Implemented** | Desktop preview, no hardware needed |
 | [`packages/ht32`](packages/ht32) | **Implemented**, verified on hardware | HT32 panel driver (320x170, RGB565, raw USB) |
 | [`packages/widgets`](packages/widgets) | **Implemented** | Layout, labels, gauges, icons, theming |
-| [`packages/homeassistant`](packages/homeassistant) | Planned | Home Assistant custom integration |
+| [`packages/homeassistant`](packages/homeassistant) | **Implemented** | YAML dashboards, entity binding, change-driven render loop |
+| [`custom_components/tinydisplay`](custom_components/tinydisplay) | **Implemented**, not yet run in Home Assistant | The custom integration itself |
+
+The last row is separate on purpose. `packages/homeassistant` is a library that
+never imports `homeassistant`; the integration that does is a thin adapter over
+it, and it sits at the repository root because that is the only place HACS
+looks for one.
 
 See [docs/architecture.md](docs/architecture.md) for the reasoning behind the
 layering, and [docs/roadmap.md](docs/roadmap.md) for what lands when.
@@ -77,6 +95,18 @@ A dashboard built from the widget library, rather than by hand:
 ```bash
 uv run python -m tinydisplay.simulator examples/widget_dashboard.py
 ```
+
+A *Home Assistant* dashboard — written as YAML, driven by fake entity state,
+with no Home Assistant installed and nothing plugged in:
+
+```bash
+uv run python -m tinydisplay.simulator examples/ha_simulator_dashboard.py
+```
+
+Edit [`examples/ha_dashboard.yaml`](examples/ha_dashboard.yaml) with the window
+open and the panel follows. That the same document drives both this and a real
+Home Assistant is the point of the layering — entity state arrives through a
+one-method protocol, so a dictionary and `hass.states` are interchangeable.
 
 With an HT32 panel attached, the same drawing code goes to hardware — or to a
 recorder, if you want to see the packets without owning one:

@@ -111,16 +111,83 @@ wrong panel.
 Deliberately absent: intrinsic sizing (no `measure()`, so slots are fixed or
 weighted rather than content-sized) and scrolling or animation.
 
-## Phase 5 — Home Assistant integration
+## Phase 5 — Home Assistant integration ✅
 
-**`tinydisplay-homeassistant`.** Last, deliberately: by this point the
+**`tinydisplay-homeassistant`**, plus the custom component in
+`custom_components/tinydisplay/`. Last, deliberately: by this point the
 rendering stack is proven, so integration bugs are unambiguously integration
 bugs.
 
-- A custom component with config-flow setup.
-- Entity subscription and a change-driven render loop.
-- YAML dashboard definitions, Lovelace-flavoured.
-- HACS packaging.
+The phase is split in two, along the same line Phase 3 drew between `protocol`
+and `transport` — **what can be tested without the thing attached, and what
+cannot.**
+
+The **library** is everything that does not need Home Assistant:
+
+- `state`: `EntityState` and the one-method `StateSource` protocol. This is the
+  seam. The integration implements it over `hass.states`; the tests and the
+  simulator use a dictionary, and nothing above can tell them apart.
+- `template`: placeholder substitution with a closed set of filters. Parsing is
+  strict — an unknown filter raises when the dashboard loads — and rendering is
+  total, because a sensor dropping out must not stop a panel.
+- `schema`: YAML to a validated description, with unknown keys rejected and
+  every error carrying its path in the document.
+- `build`: the description to a widget tree, plus a flat tuple of updaters.
+- `runner`: a render loop driven by an `asyncio.Event` rather than a clock.
+
+The **component** is the part that cannot be tested here, and is kept small
+because of it: adapt `hass.states`, subscribe, pick a driver, own a task.
+
+Four decisions worth knowing:
+
+**It is not Jinja.** Home Assistant's own templating would have been the
+obvious choice and would have made the entire dashboard layer unrunnable
+outside Home Assistant — untestable in CI, unpreviewable in the simulator.
+`StateSource` is where a Jinja-backed resolver would plug in later; the small
+filter table is what makes the trade unnecessary for now.
+
+**Keep-alives are a parameter, not a feature of the loop.** The HT32 needs
+`heartbeat()` about once a second, and the loop must not import a driver to
+know that — that would invert the stack and mean a second panel required
+changes up here. The caller passes the coroutine; the loop schedules it against
+the same deadlines as the frames.
+
+**The tree is built once and updated.** Rebuilding per frame would discard
+cached layout, dirty tracking and sparkline history every time. Building
+produces updaters, and a dashboard with no templates produces none.
+
+**The layering is asserted, not trusted.** A test walks every module under
+`packages/` and fails if any of them imports `homeassistant`, and checks that
+the component's pinned requirements still match the workspace's versions.
+
+Deliberately absent: recorder history (a sparkline shows what it has seen since
+the panel started), touch and button input, and any entity published back to
+Home Assistant.
+
+**Not yet run in Home Assistant.** Phase 3 reached the panel from an *add-on*
+container, which asks for `usb`, `udev` and `full_access` and needs Protection
+Mode off. An integration runs in the *Core* container instead and cannot
+request any of that, so every permission the driver relies on had to be
+re-established there.
+
+Core does see `/dev/bus/usb` — confirmed on Home Assistant OS 18.1 — which
+settles the question that would have sunk this design outright. What is left is
+whether it can *write* to the node and detach `usbhid`, since the nodes are
+`crw-rw-r--` and a listing proves neither.
+[`tools/ht32_usbfs_preflight.py`](../tools/ht32_usbfs_preflight.py) answers
+that: standard library only, so it runs inside Core where nothing is installed,
+and pinned to the driver's own discovery by a test so its answer is an answer
+about `tinydisplay-ht32`.
+
+If write access turns out to be absent, the fix is not configuration — the
+panel would have to be driven by a process that can hold those privileges,
+talking to Home Assistant over its API rather than rendering in-process.
+Everything below `custom_components/` survives that unchanged, which is the
+argument for having put the `StateSource` seam where it is.
+
+Second, and merely tedious: the packages the manifest pins are not on PyPI, so
+the requirement has to be satisfied by building wheels into `/config/deps` by
+hand. See [the integration's README](../custom_components/tinydisplay/README.md).
 
 ## Beyond
 

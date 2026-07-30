@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "TinyDisplay panel",
+        "description": "Point TinyDisplay at a panel and a dashboard file. The dashboard is validated now, so a mistake in it shows up here rather than as a blank screen.",
+        "data": {
+          "driver": "Panel",
+          "dashboard": "Dashboard file",
+          "serial_number": "USB serial number"
+        },
+        "data_description": {
+          "driver": "The HT32 is a 320x170 panel driven over raw USB. The preview driver renders frames without any hardware attached, which is useful for checking a dashboard.",
+          "dashboard": "Absolute path to a YAML dashboard, readable by Home Assistant.",
+          "serial_number": "Only needed when more than one identical panel is attached."
+        }
+      }
+    },
+    "error": {
+      "invalid_dashboard": "That dashboard could not be loaded: {error}"
+    },
+    "abort": {
+      "already_configured": "That panel is already set up."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Repainting",
+        "description": "The panel repaints when an entity on the dashboard changes. These bounds decide how eagerly.",
+        "data": {
+          "min_interval": "Minimum seconds between repaints",
+          "max_interval": "Maximum seconds between repaints",
+          "landscape": "Landscape orientation"
+        },
+        "data_description": {
+          "min_interval": "A floor, so that a burst of state changes becomes one repaint rather than a dozen.",
+          "max_interval": "A ceiling, so the panel refreshes even when nothing has changed.",
+          "landscape": "Turn off to draw the short way round."
+        }
+      }
+    }
+  }
+}

@@ -25,10 +25,15 @@ repos:
     rev: v1.11.2
     hooks:
       - id: mypy
-        # mypy needs the real dependencies to check numpy/PIL call sites.
+        # mypy needs the real dependencies to check numpy/PIL call sites, and
+        # PyYAML's stubs to check the dashboard parser. Home Assistant is
+        # deliberately absent: the custom component is checked with its symbols
+        # treated as untyped, which is what the overrides in pyproject.toml do.
         additional_dependencies:
           - numpy>=1.26
           - pillow>=10.1
           - pytest>=8.3
+          - pyyaml>=6.0
+          - types-PyYAML>=6.0
         args: [--config-file=pyproject.toml]
         pass_filenames: false

@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "tinydisplay-homeassistant"
+version = "0.1.0"
+description = "Home Assistant dashboards for TinyDisplay: YAML definitions, entity binding and a change-driven render loop."
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+keywords = ["display", "home-assistant", "dashboard", "yaml", "embedded"]
+authors = [{ name = "The TinyDisplay authors" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Home Automation",
+    "Topic :: Multimedia :: Graphics",
+    "Typing :: Typed",
+]
+dependencies = [
+    # Layout, labels, gauges and theming -- what a dashboard is built from.
+    "tinydisplay-widgets",
+    # Dashboard definitions are YAML. Home Assistant already ships PyYAML, so
+    # this costs nothing in the environment this package actually runs in.
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+# Type stubs for PyYAML. Not needed at runtime, and not something a Home
+# Assistant install should be made to carry.
+types = ["types-PyYAML>=6.0"]
+
+[project.urls]
+Homepage = "https://github.com/chad-albrecht/tinydisplay"
+Source = "https://github.com/chad-albrecht/tinydisplay"
+Issues = "https://github.com/chad-albrecht/tinydisplay/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/tinydisplay"]
