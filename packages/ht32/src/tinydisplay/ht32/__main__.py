@@ -50,6 +50,11 @@ __all__ = ["build_parser", "main"]
 
 DEFAULT_PATTERN = "bars"
 
+#: How long ``frame`` holds its pattern on screen, sending keep-alives. Long
+#: enough to walk round the machine and look at it; short enough that the
+#: command still ends on its own.
+DEFAULT_HOLD_SECONDS = 20
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Construct the argument parser."""
@@ -108,6 +113,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Write to a recorder instead of the panel.",
+    )
+    frame.add_argument(
+        "--hold",
+        type=int,
+        default=DEFAULT_HOLD_SECONDS,
+        help=(
+            "Seconds to hold the frame on screen, sending keep-alives. "
+            "Without these the panel paints its disconnection banner over the "
+            f"pattern about a second after we stop (default: {DEFAULT_HOLD_SECONDS})."
+        ),
     )
 
     led = subparsers.add_parser(
@@ -242,6 +257,7 @@ async def run_frame(
     serial: str | None,
     dry_run: bool,
     hidraw: str | None = None,
+    hold: int = DEFAULT_HOLD_SECONDS,
 ) -> int:
     """Draw a pattern on the panel. Returns a process exit status."""
     transport: RecordingHidTransport | HidrawTransport | None
@@ -257,18 +273,36 @@ async def run_frame(
 
     try:
         async with driver:
+            # The panel starts every session believing the host is gone -- that
+            # is what its disconnection banner is -- and paints that banner
+            # back over the frame about a second after the last keep-alive.
+            # A diagnostic that draws once and exits therefore shows a defaced
+            # screen on perfectly working hardware, which is exactly the sort
+            # of false negative a bring-up tool must not produce. So: introduce
+            # ourselves first, then hold the frame with keep-alives long enough
+            # to be looked at.
+            await driver.heartbeat()
             canvas = driver.create_canvas()
             draw_pattern(canvas, pattern)
             for _ in range(max(1, repeat)):
                 await driver.show(canvas)
+            # Nothing reaches a panel in a dry run, so there is nothing to hold
+            # on screen and no reason to make the caller wait for it.
+            for _ in range(0 if dry_run else max(0, hold)):
+                await asyncio.sleep(1.0)
+                await driver.heartbeat()
     except HT32Error as exc:
         _report(f"error: {exc}")
         return 1
 
     if recorder is not None:
+        # Frame packets and keep-alives are counted apart, because "28 packets"
+        # for a 27-chunk frame reads like an arithmetic error otherwise.
+        frame_packets = recorder.write_count - driver.heartbeat_count
         _report(
             f"dry run: {driver.frame_count} frame(s), "
-            f"{recorder.write_count} packets of {PACKET_SIZE} bytes, nothing sent"
+            f"{frame_packets} packets of {PACKET_SIZE} bytes, "
+            f"plus {driver.heartbeat_count} keep-alive(s), nothing sent"
         )
     else:
         _report(f"sent {driver.frame_count} frame(s) of pattern {pattern!r}")
@@ -284,7 +318,17 @@ def _expectation(pattern: str) -> str:
     return {
         "bars": (
             "  Eight vertical bars, each matching its label. If the bar labelled\n"
-            "  'red' is not red, the RGB565 byte order is wrong."
+            "  'red' is not red, the RGB565 byte order is wrong.\n"
+            "  This pattern cannot tell you the image is upside down -- use\n"
+            "  'corners' for that."
+        ),
+        "corners": (
+            "  Four coloured corners and a line of text. Turn your head until the\n"
+            "  words read normally, then find the red block:\n"
+            "    top left     -- correct\n"
+            "    bottom right -- rotated half a turn\n"
+            "    bottom left  -- rows reversed\n"
+            "    top right    -- columns reversed"
         ),
         "gradient": (
             "  Two smooth ramps, cyan-to-pink on top and black-to-white below.\n"
@@ -341,6 +385,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     serial=args.serial,
                     dry_run=args.dry_run,
                     hidraw=args.hidraw,
+                    hold=args.hold,
                 )
             )
         return asyncio.run(

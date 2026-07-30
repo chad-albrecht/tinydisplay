@@ -299,3 +299,89 @@ class TestIntrospection:
         driver, _ = make_driver()
         assert "320x170" in repr(driver)
         assert "disconnected" in repr(driver)
+
+
+class TestRotation:
+    """The S1's panel is mounted upside down, so the host turns the picture.
+
+    This was found the hard way. Three bring-up patterns each failed to show
+    it: colour bars are symmetric top to bottom, the gradient has to be read
+    against a remembered original, and the panel's own orientation command --
+    which would have been the obvious fix -- does nothing at all on this
+    firmware. See ``draw_corner_markers``.
+    """
+
+    def test_rotation_is_on_by_default(self) -> None:
+        # The driver is written for the AceMagic S1, and on that machine an
+        # unrotated frame is upside down. Defaulting to correct beats
+        # defaulting to literal.
+        assert HT32Driver(transport=RecordingHidTransport()).rotate_180 is True
+
+    def test_rotation_can_be_turned_off(self) -> None:
+        driver = HT32Driver(transport=RecordingHidTransport(), rotate_180=False)
+        assert driver.rotate_180 is False
+
+    def test_unrotated_encoding_matches_the_canvas(self) -> None:
+        canvas = Canvas(PANEL_WIDTH, PANEL_HEIGHT)
+        canvas.clear(Color.BLACK)
+        canvas.rect(0, 0, 8, 8, Color.from_hex("#ff0000"))
+
+        driver = HT32Driver(transport=RecordingHidTransport(), rotate_180=False)
+        assert driver.encode(canvas) == canvas.to_rgb565(byte_order="big")
+
+    def test_rotation_matches_a_real_image_rotation(self) -> None:
+        # Reversing the pixel sequence is only valid because the buffer is
+        # row-major; pinning it to Pillow's own rotate(180) is what makes that
+        # an argument rather than an assertion.
+        canvas = Canvas(PANEL_WIDTH, PANEL_HEIGHT)
+        canvas.clear(Color.BLACK)
+        canvas.rect(0, 0, 8, 8, Color.from_hex("#ff0000"))
+        canvas.rect(PANEL_WIDTH - 20, PANEL_HEIGHT - 10, 20, 10, Color.from_hex("#00ff00"))
+
+        driver = HT32Driver(transport=RecordingHidTransport())
+        turned = Canvas.from_pil(canvas.to_pil().rotate(180))
+        assert driver.encode(canvas) == turned.to_rgb565(byte_order="big")
+
+    def test_rotation_moves_the_top_left_pixel_to_the_bottom_right(self) -> None:
+        canvas = Canvas(PANEL_WIDTH, PANEL_HEIGHT)
+        canvas.clear(Color.BLACK)
+        canvas.pixel(0, 0, Color.WHITE)
+
+        driver = HT32Driver(transport=RecordingHidTransport())
+        encoded = driver.encode(canvas)
+
+        # Last pixel of the encoded frame, two bytes, big-endian RGB565 white.
+        assert encoded[-2:] == b"\xff\xff"
+        assert encoded[:2] == b"\x00\x00"
+
+    def test_rotating_an_already_turned_canvas_gives_the_original(self) -> None:
+        # Half a turn is its own inverse, so feeding the driver a pre-rotated
+        # canvas must produce exactly what the unrotated driver makes of the
+        # original.
+        canvas = Canvas(PANEL_WIDTH, PANEL_HEIGHT)
+        canvas.clear(Color.BLACK)
+        canvas.rect(4, 4, 30, 12, Color.from_hex("#00ffff"))
+
+        rotated = HT32Driver(transport=RecordingHidTransport())
+        plain = HT32Driver(transport=RecordingHidTransport(), rotate_180=False)
+        turned = Canvas.from_pil(canvas.to_pil().rotate(180))
+        assert rotated.encode(turned) == plain.encode(canvas)
+
+    def test_the_frame_keeps_its_length(self) -> None:
+        canvas = Canvas(PANEL_WIDTH, PANEL_HEIGHT)
+        driver = HT32Driver(transport=RecordingHidTransport())
+        assert len(driver.encode(canvas)) == driver.frame_size
+
+    async def test_rotation_reaches_the_wire(self) -> None:
+        canvas = Canvas(PANEL_WIDTH, PANEL_HEIGHT)
+        canvas.clear(Color.BLACK)
+        canvas.pixel(0, 0, Color.WHITE)
+
+        transport = RecordingHidTransport()
+        async with HT32Driver(transport=transport) as driver:
+            await driver.show(canvas)
+
+        # The white pixel belongs at the very end of the frame, which is the
+        # final payload byte pair of the last chunk.
+        payload_end = REPORT_SIZE + HEADER_SIZE + CHUNK_SIZES[-1]
+        assert transport.packets[-1][payload_end - 2 : payload_end] == b"\xff\xff"

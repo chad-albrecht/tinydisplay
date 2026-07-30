@@ -22,7 +22,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Final
 
-from tinydisplay.core import Color, Font, HorizontalAlign
+from tinydisplay.core import Color, Font, HorizontalAlign, VerticalAlign
 from tinydisplay.ht32.protocol import CHUNK_COUNT, PIXELS_PER_CHUNK
 
 if TYPE_CHECKING:
@@ -35,6 +35,7 @@ __all__ = [
     "draw_black",
     "draw_chunk_marks",
     "draw_colour_bars",
+    "draw_corner_markers",
     "draw_gradient",
     "draw_pattern",
     "draw_solid",
@@ -163,9 +164,66 @@ def draw_black(canvas: Canvas) -> None:
     draw_solid(canvas, Color.BLACK)
 
 
+#: Corner colours, clockwise from the top left. Four hues nobody can confuse
+#: at a glance, in a dim room, through a phone camera.
+_CORNERS: Final = (
+    ("#ff0000", 0, 0),  # top-left, red
+    ("#00ff00", 1, 0),  # top-right, green
+    ("#ffff00", 1, 1),  # bottom-right, yellow
+    ("#0000ff", 0, 1),  # bottom-left, blue
+)
+
+
+def draw_corner_markers(canvas: Canvas) -> None:
+    """Coloured corners and a line of text, to catch a flipped or rotated panel.
+
+    This exists because the other patterns cannot. Colour bars are vertical and
+    symmetric top to bottom, so a panel showing them upside down still shows
+    "the bar labelled red is red" -- the exact check
+    :func:`draw_colour_bars` tells you to make. The gradient is better but
+    still has to be read against a remembered original, and a photograph of a
+    glossy panel in a dark cabinet is not a reliable way to do that.
+
+    Here the frame carries its own reference. The text says where red should
+    be, so it does not matter which way up the machine sits or how the picture
+    was taken: rotate until the words read normally, then look at the corners.
+
+    - red in the top left, text readable -- correct
+    - red in the bottom right, text upside down -- rotated half a turn
+    - red in the bottom left, letters flipped top to bottom -- rows reversed
+    - red in the top right, letters flipped left to right -- columns reversed
+
+    Found the AceMagic S1's panel to be mounted upside down, after three
+    other patterns had each failed to show it.
+    """
+    canvas.clear(Color.BLACK)
+    block_width = canvas.width // 4
+    block_height = canvas.height // 3
+
+    for colour, column, row in _CORNERS:
+        canvas.rect(
+            column * (canvas.width - block_width),
+            row * (canvas.height - block_height),
+            block_width,
+            block_height,
+            Color.from_hex(colour),
+        )
+
+    canvas.text(
+        canvas.width // 2,
+        canvas.height // 2,
+        "RED = TOP LEFT",
+        Color.WHITE,
+        font=Font.default(22),
+        align=HorizontalAlign.CENTER,
+        valign=VerticalAlign.MIDDLE,
+    )
+
+
 #: Patterns available by name, for the command line.
 PATTERNS: Final[dict[str, Callable[[Canvas], None]]] = {
     "bars": draw_colour_bars,
+    "corners": draw_corner_markers,
     "gradient": draw_gradient,
     "chunks": draw_chunk_marks,
     "solid": draw_solid,

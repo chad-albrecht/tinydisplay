@@ -30,6 +30,8 @@ import asyncio
 import time
 from typing import TYPE_CHECKING, Final
 
+import numpy as np
+
 from tinydisplay.core import DisplayDriver
 from tinydisplay.core.errors import DriverNotConnectedError
 from tinydisplay.ht32.errors import HT32Error, TransportError
@@ -47,6 +49,7 @@ from tinydisplay.ht32.transport import create_panel_transport
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+    from tinydisplay.core import Canvas
     from tinydisplay.ht32.transport import PanelTransport
 
 __all__ = ["DEFAULT_RECONNECT_ATTEMPTS", "DEFAULT_RECONNECT_DELAY", "HT32Driver"]
@@ -77,6 +80,11 @@ class HT32Driver(DisplayDriver):
             again. Turn it off when a failure should surface immediately.
         reconnect_attempts: How many times to retry a failed frame.
         reconnect_delay: Seconds to wait between attempts.
+        rotate_180: Turn each frame half a revolution before encoding it. On
+            the AceMagic S1 the panel is mounted upside down in the chassis,
+            so a frame sent as drawn appears rotated -- and the panel's own
+            orientation command does not fix it, because that command is
+            inert on this firmware. See :meth:`encode`.
     """
 
     def __init__(
@@ -88,6 +96,7 @@ class HT32Driver(DisplayDriver):
         auto_reconnect: bool = True,
         reconnect_attempts: int = DEFAULT_RECONNECT_ATTEMPTS,
         reconnect_delay: float = DEFAULT_RECONNECT_DELAY,
+        rotate_180: bool = True,
     ) -> None:
         super().__init__(
             PANEL_WIDTH,
@@ -105,6 +114,7 @@ class HT32Driver(DisplayDriver):
             else create_panel_transport(serial_number=serial_number)
         )
         self._owns_transport = transport is None
+        self._rotate_180 = rotate_180
         self._auto_reconnect = auto_reconnect
         self._reconnect_attempts = reconnect_attempts
         self._reconnect_delay = reconnect_delay
@@ -144,6 +154,42 @@ class HT32Driver(DisplayDriver):
     def auto_reconnect(self) -> bool:
         """Whether failed writes trigger a reconnection attempt."""
         return self._auto_reconnect
+
+    @property
+    def rotate_180(self) -> bool:
+        """Whether frames are turned half a revolution before encoding."""
+        return self._rotate_180
+
+    # -- Encoding ----------------------------------------------------------
+
+    def encode(self, canvas: Canvas) -> bytes:
+        """Encode a canvas, rotating it half a revolution when configured to.
+
+        The panel in an AceMagic S1 is mounted upside down: a frame sent
+        exactly as drawn arrives with its top-left corner in the bottom-right,
+        and its text unreadable. The obvious remedy -- the panel's own
+        orientation command -- does nothing. Every documented and undocumented
+        value for it was swept against real hardware and none changed the
+        image, so that command is inert on this firmware and the host has to
+        turn the picture itself.
+
+        Doing it here rather than in the widget layer keeps it where it
+        belongs. This is a fact about one panel's physical mounting, not about
+        drawing, and a dashboard should not have to know which way round its
+        screen was glued.
+
+        Rotating by half a revolution reverses both axes, and in a row-major
+        buffer that is exactly reversing the sequence of pixels -- so this
+        costs one reversed view of an array rather than an image rotation, and
+        it is pinned to Pillow's own ``rotate(180)`` by a test.
+        """
+        data = super().encode(canvas)
+        if not self._rotate_180:
+            return data
+        # uint16 because a pixel is two bytes; the values are never
+        # interpreted, only reordered, so the panel's byte order is preserved
+        # whatever this machine's endianness happens to be.
+        return np.frombuffer(data, dtype=np.uint16)[::-1].tobytes()
 
     # -- Driver hooks ------------------------------------------------------
 

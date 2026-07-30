@@ -160,7 +160,18 @@ class SubCommand(IntEnum):
     SET_TIME = 0xF2
 
 
-#: Byte 4 of an orientation command. Confirmed against hardware.
+#: Byte 4 of an orientation command, as upstream writes them.
+#:
+#: **These do nothing on the AceMagic S1.** An earlier version of this comment
+#: said "confirmed against hardware"; that was never true. The only bring-up
+#: that had run went through the ``frame`` subcommand, which sends no
+#: orientation packet at all, so what had been confirmed was the panel's
+#: power-on state and not these values.
+#:
+#: Sweeping 0x00 through 0x04 against a real panel changed nothing, so the
+#: command appears to be unimplemented in this firmware. The S1's panel is
+#: mounted upside down and the host has to compensate -- see
+#: :class:`~tinydisplay.ht32.driver.HT32Driver`'s ``rotate_180``.
 ORIENTATION_LANDSCAPE: Final = 0x01
 ORIENTATION_PORTRAIT: Final = 0x02
 
