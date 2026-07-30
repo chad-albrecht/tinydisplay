@@ -30,18 +30,22 @@ independent implementations agree on the same five-byte packet and the same
 five effects, and sweeping theme bytes 0x06 through 0x0C against a real strip
 produced no response at all.
 
-**A solid colour is still reachable, by a trick.** Each animated effect starts
-from a fixed colour, so sending the same command faster than the animation can
-advance pins it at that first frame. ``fsncps/acemagic-ledctl`` uses this to
-hold red (restarting :attr:`LedTheme.COLORS`, which begins red) and blue-purple
-(restarting :attr:`LedTheme.RAINBOW`, which begins there).
+**A solid colour is reported to be reachable by restarting an effect faster
+than it animates**, since each one begins from a fixed colour --
+``fsncps/acemagic-ledctl`` holds red this way from :attr:`LedTheme.COLORS` and
+blue-purple from :attr:`LedTheme.RAINBOW`, at roughly 40 restarts a second.
 
-Two limits are worth knowing before reaching for it. Only the *starting* colour
-of each effect can be held -- a reset always returns to frame zero, so a colour
-partway through a cycle cannot be sat on, and green is not available at all.
-And the rate is not tunable: at five bytes and 5 ms of pacing between them a
-packet takes about 20 ms, so "roughly 40 Hz" is the link running flat out, and
-holding a colour means saturating the serial line for as long as you want it.
+**It does not work on the AceMagic S1.** Implemented here and tried against
+real hardware, it flickered rather than holding: the strip visibly restarts on
+each command instead of sitting at the first frame. The implementation was
+removed rather than left in as something that half-works. That project targets
+the ACEMAGIC T9, so the likeliest explanation is that the two machines' LED
+microcontrollers differ in how they handle a command arriving mid-animation.
+
+The arithmetic is worth keeping even so, because it bounds any retry: a packet
+is five bytes paced 5 ms apart with no delay after the last, so 20 ms, so fifty
+a second is the ceiling. "Roughly 40 Hz" is the link running flat out, not a
+tuned figure -- there is no headroom to go faster with.
 
 Example:
     >>> from tinydisplay.ht32.led import LedTheme, build_led_packet

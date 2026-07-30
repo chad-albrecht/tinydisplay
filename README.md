@@ -180,6 +180,41 @@ A few decisions worth knowing before reading the code:
   corrupt its neighbours — and there is no translating-canvas wrapper in the
   hot path.
 
+## Additional documentation and acknowledgments
+
+The HT32 panel ships with no specification. Its wire format was reconstructed
+by reading other people's work, and this project would have been considerably
+harder — and in places wrong for longer — without theirs.
+
+| Project | Language | What it gave us |
+| --- | --- | --- |
+| [ananthb/ht32-panel][ht32] ([hardware crate][ht32-hw], [docs][ht32-docs]) | Rust | The primary source for the wire format: packet framing, the 27-chunk redraw, the config and heartbeat commands. Its `Orientation` module later confirmed independently that the panel supports only two hardware orientations and that upside-down is a software rotation. |
+| [tjaworski/AceMagic-S1-LED-TFT-Linux][tj] | Node.js | Drives both devices on this exact machine. The source of the `node-hid` + `setDriverType('libusb')` observation that eventually explained why `hidraw` cannot carry a frame, and an independent statement of the five-byte `0xFA` LED protocol. |
+| [rojkov/s1display][s1] | C | A libusb-only implementation, and the second piece of evidence that everyone who succeeds with this panel reaches for libusb rather than the kernel's HID path. |
+| [fsncps/acemagic-ledctl][ledctl] | Python | A third independent build of the LED packet, byte-for-byte identical to ours — and the restart-to-hold-a-colour technique, which is documented for the ACEMAGIC T9 and does not hold on the S1. |
+
+Two of these corrected us rather than merely informing us, which is worth
+saying out loud: reading `ht32-panel` retired a claim in this repository that
+the S1 has no interface 1 — it does, and upstream's hard-coded number was right
+all along — and `acemagic-ledctl` showed that "the protocol cannot express a
+colour" had been over-read into "a colour is impossible".
+
+Project-specific notes live with the code they concern:
+
+- [`packages/ht32/README.md`](packages/ht32/README.md) — the reconstructed wire
+  protocol, what each source got wrong, and what hardware bring-up settled.
+- [`docs/architecture.md`](docs/architecture.md) — why the packages are layered
+  the way they are.
+- [`docs/roadmap.md`](docs/roadmap.md) — what landed in each phase, including
+  the corrections later phases made to earlier ones.
+
+[ht32]: https://github.com/ananthb/ht32-panel
+[ht32-hw]: https://github.com/ananthb/ht32-panel/tree/main/crates/ht32-panel-hw
+[ht32-docs]: https://ananthb.github.io/ht32-panel/index.html
+[tj]: https://github.com/tjaworski/AceMagic-S1-LED-TFT-Linux
+[s1]: https://github.com/rojkov/s1display
+[ledctl]: https://github.com/fsncps/acemagic-ledctl
+
 ## Licence
 
 [MIT](LICENSE).

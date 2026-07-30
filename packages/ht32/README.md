@@ -80,18 +80,19 @@ S1's motherboard whose firmware owns the colours. Theme bytes `0x06`-`0x0C`
 produce no response on real hardware, and three independent implementations
 agree on the same five-byte packet and the same five effects.
 
-**A solid colour is still reachable, by a trick.** Each animated effect starts
-from a fixed colour, so resending the command faster than the animation
-advances pins it at that first frame — red from `COLORS`, blue-purple from
-`RAINBOW`. [`fsncps/acemagic-ledctl`][ledctl] does this at about 40 Hz.
+**Restarting an effect to hold a colour does not work here.**
+[`fsncps/acemagic-ledctl`][ledctl] holds a solid colour by resending the
+command faster than the animation advances, pinning it at the first frame —
+red from `COLORS`, blue-purple from `RAINBOW`, at about 40 Hz. That was
+implemented in this package and tried on an AceMagic S1, where it **flickered**
+rather than holding: the strip visibly restarts on each command. It was removed
+rather than shipped as something that half-works. That project targets the
+ACEMAGIC T9, so the two machines' LED controllers most likely differ in how
+they treat a command arriving mid-animation.
 
-Two limits: only the *starting* colour of an effect can be held, since a reset
-returns to frame zero — so green, which lives partway through a cycle, is not
-available. And 40 Hz is the serial link flat out (five bytes at 5 ms pacing is
-roughly 20 ms a packet), so holding a colour means saturating the line for as
-long as you want it held.
-
-[ledctl]: https://github.com/fsncps/acemagic-ledctl
+Worth keeping if anyone retries it: 40 Hz is the serial link flat out, not a
+tuned figure. Five bytes paced 5 ms apart is 20 ms a packet, so fifty a second
+is the hard ceiling — there is no headroom to go faster with.
 
 ## Layout
 
@@ -319,3 +320,4 @@ LED control additionally needs membership of the `dialout` group.
 
 [ht32]: https://ananthb.github.io/ht32-panel/index.html
 [hw]: https://github.com/ananthb/ht32-panel/tree/main/crates/ht32-panel-hw
+[ledctl]: https://github.com/fsncps/acemagic-ledctl
