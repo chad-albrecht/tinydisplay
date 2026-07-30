@@ -68,8 +68,8 @@ a canvas it never drew.
 | [`packages/simulator`](packages/simulator) | **Implemented** | Desktop preview, no hardware needed |
 | [`packages/ht32`](packages/ht32) | **Implemented**, verified on hardware | HT32 panel driver (320x170, RGB565, raw USB) |
 | [`packages/widgets`](packages/widgets) | **Implemented** | Layout, labels, gauges, icons, theming |
-| [`packages/homeassistant`](packages/homeassistant) | **Implemented** | YAML dashboards, entity binding, change-driven render loop |
-| [`custom_components/tinydisplay`](custom_components/tinydisplay) | **Implemented**, not yet run in Home Assistant | The custom integration itself |
+| [`packages/homeassistant`](packages/homeassistant) | **Implemented**, verified on hardware | YAML dashboards, entity binding, change-driven render loop |
+| [`custom_components/tinydisplay`](custom_components/tinydisplay) | **Implemented**, verified on hardware | The custom integration itself |
 
 The last row is separate on purpose. `packages/homeassistant` is a library that
 never imports `homeassistant`; the integration that does is a thin adapter over
