@@ -43,7 +43,7 @@ from tinydisplay.homeassistant.errors import HomeAssistantError
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
 
-    from tinydisplay.core import DisplayDriver
+    from tinydisplay.core import Canvas, DisplayDriver
     from tinydisplay.homeassistant.dashboard import Dashboard
     from tinydisplay.homeassistant.state import StateSource
 
@@ -81,6 +81,7 @@ async def run_dashboard(
     keepalive: Callable[[], Awaitable[None]] | None = None,
     keepalive_interval: float = DEFAULT_KEEPALIVE_INTERVAL,
     on_connect: Callable[[], Awaitable[None]] | None = None,
+    on_frame: Callable[[Canvas], None] | None = None,
     max_frames: int | None = None,
 ) -> int:
     """Draw ``dashboard`` through ``driver``, repainting when state changes.
@@ -107,6 +108,13 @@ async def run_dashboard(
             frame. This is where per-panel setup goes -- the HT32 sets its
             orientation here -- so that the loop stays driver-agnostic without
             pretending panels have nothing to configure.
+        on_frame: Called with each canvas *after* it reaches the panel, so a
+            caller can show the same picture somewhere else. Called after
+            rather than before because a frame the driver rejected is not one
+            the panel showed, and a preview claiming otherwise would be worse
+            than no preview. Exceptions raised here are not caught: this is
+            caller-supplied bookkeeping, not dashboard code, and swallowing its
+            failures would hide a bug in something that should be trivial.
         max_frames: Stop after this many frames. ``None`` runs until cancelled,
             which is what an integration wants; a number is what a test wants.
 
@@ -178,6 +186,8 @@ async def run_dashboard(
                         last_error = None
                     await driver.show(canvas)
                     frames += 1
+                    if on_frame is not None:
+                        on_frame(canvas)
                 continue
 
             await _wait(signal, _earliest(due, next_beat), loop)

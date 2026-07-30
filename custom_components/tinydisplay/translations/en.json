@@ -40,5 +40,12 @@
         }
       }
     }
+  },
+  "entity": {
+    "image": {
+      "preview": {
+        "name": "Panel preview"
+      }
+    }
   }
 }

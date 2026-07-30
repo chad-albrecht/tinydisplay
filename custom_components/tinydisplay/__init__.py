@@ -27,7 +27,7 @@ from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from tinydisplay.core import TinyDisplayError
 from tinydisplay.homeassistant import Dashboard, DashboardConfigError
 
-from .const import CONF_DASHBOARD, CONF_DRIVER, CONF_SERIAL_NUMBER, DRIVER_MEMORY
+from .const import CONF_DASHBOARD, CONF_DRIVER, CONF_SERIAL_NUMBER, DRIVER_MEMORY, PLATFORMS
 from .runtime import HassStateSource, TinyDisplayRuntime, create_driver
 
 if TYPE_CHECKING:
@@ -77,15 +77,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry) 
         source=HassStateSource(hass),
         options=dict(entry.options),
     )
+    # Attached before starting, because the preview entity reads it from the
+    # entry the moment the platform constructs it.
+    entry.runtime_data = runtime
     try:
         await runtime.async_start(hass)
+        await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     except Exception:
         # Setup failed after the panel was opened. Releasing it matters: Home
         # Assistant will retry, and a USB node still held by the previous
         # attempt fails the next one for a reason that looks nothing like this.
+        await runtime.async_stop()
         await driver.disconnect()
         raise
-    entry.runtime_data = runtime
 
     _LOGGER.debug(
         "started %s on %s, watching %d entities",
@@ -100,9 +104,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry) 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry) -> bool:
     """Stop the render loop and release the panel."""
-    del hass
+    unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     await entry.runtime_data.async_stop()
-    return True
+    return unloaded
 
 
 async def async_reload_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry) -> None:

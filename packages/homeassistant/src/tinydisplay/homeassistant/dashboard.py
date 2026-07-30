@@ -48,6 +48,21 @@ if TYPE_CHECKING:
 __all__ = ["Dashboard"]
 
 
+def _modified_at(path: Path | None) -> int | None:
+    """The file's modification time in nanoseconds, or ``None``.
+
+    Nanoseconds because a dashboard edited twice within the same second is an
+    ordinary thing to do while getting a layout right, and a second-resolution
+    stamp would miss the second edit.
+    """
+    if path is None:
+        return None
+    try:
+        return path.stat().st_mtime_ns
+    except OSError:
+        return None
+
+
 class Dashboard:
     """A validated dashboard, built and ready to draw.
 
@@ -61,12 +76,13 @@ class Dashboard:
     once and in one place.
     """
 
-    __slots__ = ("_built", "_source_path", "_spec")
+    __slots__ = ("_built", "_source_path", "_spec", "_stamp")
 
     def __init__(self, spec: DashboardSpec, *, source_path: Path | None = None) -> None:
         self._spec = spec
         self._built = build_dashboard(spec)
         self._source_path = source_path
+        self._stamp = _modified_at(source_path)
 
     # -- Construction ------------------------------------------------------
 
@@ -174,6 +190,40 @@ class Dashboard:
         canvas.clear(self.background)
         self._built.root.bounds = Rect(0, 0, canvas.width, canvas.height)
         self._built.root.draw(canvas)
+
+    def reload_if_changed(self) -> bool:
+        """Re-read the file if it has changed on disk. Returns whether it did.
+
+        The rebuild happens *in place*: a caller holding this object keeps
+        holding it, which is what lets a running render loop pick up an edit
+        without being restarted. The alternative -- handing back a new
+        ``Dashboard`` -- would mean every holder needed to be found and
+        updated, and the render loop is deliberately not that kind of object.
+
+        A file that has changed into something invalid is left alone and the
+        error is raised, so the last working dashboard stays on the panel. That
+        is the same bargain the simulator makes with its hot-reload: an edit
+        that does not parse should not blank the screen.
+
+        Raises:
+            DashboardConfigError: If the changed file no longer parses. The
+                previous dashboard remains intact and in use.
+        """
+        if self._source_path is None:
+            return False
+
+        stamp = _modified_at(self._source_path)
+        if stamp is None or stamp == self._stamp:
+            return False
+
+        spec = load_dashboard(self._source_path)
+        # Only past the parse do we commit: an exception above leaves every
+        # attribute as it was, including the stamp, so the next call tries
+        # again rather than deciding the broken version is current.
+        self._spec = spec
+        self._built = build_dashboard(spec)
+        self._stamp = stamp
+        return True
 
     def render(self, canvas: Canvas, source: StateSource) -> None:
         """Update from ``source`` and draw, in one call.

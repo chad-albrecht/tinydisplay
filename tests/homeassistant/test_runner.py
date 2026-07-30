@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from tinydisplay.core import Canvas, MemoryDriver
+from tinydisplay.core import Canvas, MemoryDriver, Size
 from tinydisplay.homeassistant import (
     Dashboard,
     HomeAssistantError,
@@ -404,3 +404,70 @@ class TestValidation:
         with pytest.raises(HomeAssistantError):
             await run_dashboard(driver, dashboard, source, min_interval=-1.0)
         assert driver.connect_count == 0
+
+
+class TestFrameHook:
+    """Handing each drawn canvas back, so a caller can show it elsewhere.
+
+    This is what the integration's image entity is built on: the loop already
+    produces the picture, and the only thing missing was a way to see it.
+    """
+
+    async def test_the_hook_receives_every_frame(
+        self, driver: MemoryDriver, dashboard: Dashboard, source: StaticStateSource
+    ) -> None:
+        seen: list[Size] = []
+        await run_dashboard(
+            driver,
+            dashboard,
+            source,
+            min_interval=0.0,
+            max_interval=TICK,
+            max_frames=3,
+            on_frame=lambda canvas: seen.append(canvas.size),
+        )
+        assert len(seen) == 3
+        assert seen[0] == driver.size
+
+    async def test_it_runs_after_the_frame_reaches_the_panel(
+        self, dashboard: Dashboard, source: StaticStateSource
+    ) -> None:
+        # A frame the driver rejected is not one the panel showed, and a
+        # preview claiming otherwise would be worse than no preview.
+        class FailingDriver(MemoryDriver):
+            async def _write(self, frame: bytes) -> None:
+                del frame
+                message = "cable fell out"
+                raise OSError(message)
+
+        seen: list[object] = []
+        with pytest.raises(OSError, match="cable fell out"):
+            await run_dashboard(
+                FailingDriver(32, 16),
+                dashboard,
+                source,
+                max_frames=1,
+                on_frame=seen.append,
+            )
+        assert seen == []
+
+    async def test_a_skipped_frame_is_not_reported(
+        self, driver: MemoryDriver, source: StaticStateSource
+    ) -> None:
+        broken = ExplodingDashboard(failures=2)
+        seen: list[object] = []
+        await run_dashboard(
+            driver,
+            broken,  # type: ignore[arg-type]
+            source,
+            min_interval=0.0,
+            max_interval=TICK,
+            max_frames=1,
+            on_frame=seen.append,
+        )
+        assert len(seen) == 1
+
+    async def test_no_hook_is_the_default(
+        self, driver: MemoryDriver, dashboard: Dashboard, source: StaticStateSource
+    ) -> None:
+        assert await run_dashboard(driver, dashboard, source, max_frames=1) == 1

@@ -11,6 +11,17 @@ from typing import Final
 
 DOMAIN: Final = "tinydisplay"
 
+#: The panel preview. A picture of the last frame is the only thing this
+#: integration usefully publishes back: it answers both "is it rendering?" and
+#: "what does it look like?", which otherwise need container logs and a walk to
+#: wherever the panel is.
+PLATFORMS: Final = ["image"]
+
+#: How often the dashboard file is checked for edits. Frequent enough that
+#: saving in the file editor feels immediate, rare enough to be one `stat` call
+#: rather than something worth thinking about.
+RELOAD_POLL_SECONDS: Final = 3
+
 #: Where the render task and its driver are kept on the config entry, so that
 #: unloading can stop what setup started.
 DATA_RUNTIME: Final = "runtime"

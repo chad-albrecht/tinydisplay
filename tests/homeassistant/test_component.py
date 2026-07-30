@@ -81,8 +81,11 @@ class TestLayout:
             "const.py",
             "config_flow.py",
             "runtime.py",
+            "discovery.py",
+            "image.py",
             "manifest.json",
             "strings.json",
+            "starter_dashboard.yaml",
         ],
     )
     def test_required_files_exist(self, name: str) -> None:
@@ -189,6 +192,14 @@ class TestTranslations:
             const.CONF_LANDSCAPE,
         }
 
+    def test_every_entity_has_a_name(self) -> None:
+        # An entity with no translated name shows up as its object id, which
+        # looks like a bug in a UI someone is meeting for the first time.
+        entities = load_json(COMPONENT / "strings.json")["entity"]
+        for platform, keys in entities.items():
+            for key, fields in keys.items():
+                assert fields.get("name"), f"{platform}.{key} has no name"
+
     def test_the_dashboard_error_is_translated(self) -> None:
         # The config flow raises this key by name; an untranslated key shows up
         # as raw text in the UI.
@@ -288,6 +299,7 @@ class TestDependencyRule:
             "collections",
             "contextlib",
             "dataclasses",
+            "datetime",
             "pathlib",
             "shutil",
             "homeassistant",

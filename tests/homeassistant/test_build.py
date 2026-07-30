@@ -8,6 +8,8 @@ produces none at all.
 
 from __future__ import annotations
 
+import itertools
+import os
 from typing import TYPE_CHECKING
 
 import pytest
@@ -15,6 +17,7 @@ import pytest
 from tinydisplay.core import Canvas, Color, Container, Rect, Widget
 from tinydisplay.homeassistant import (
     Dashboard,
+    DashboardConfigError,
     StaticStateSource,
     build_dashboard,
     parse_dashboard,
@@ -45,6 +48,12 @@ def find[WidgetT: Widget](root: Widget, kind: type[WidgetT]) -> WidgetT:
 
 def build(root: object, **document: object) -> Dashboard:
     return Dashboard.from_document({"root": root, **document})
+
+
+#: A fixed point in time for hot-reload stamps, so they never depend on the
+#: wall clock or on how fast the test ran.
+_BASE_NS = 1_700_000_000_000_000_000
+_TICKS = itertools.count(1)
 
 
 class TestUpdaterCount:
@@ -394,3 +403,106 @@ class TestDashboardFacade:
     def test_repr_names_the_theme_and_entity_count(self) -> None:
         dashboard = build({"type": "label", "text": "{{ sensor.a }}"})
         assert repr(dashboard) == "Dashboard(midnight, 1 entities)"
+
+
+class TestHotReload:
+    """Re-reading a dashboard whose file has changed, in place.
+
+    In place matters: a running render loop holds this object, and handing back
+    a new one would mean finding every holder. Rebuilding inside lets an edit
+    reach the panel without restarting anything.
+    """
+
+    def write(self, path: Path, text: str) -> None:
+        """Write the file with a stamp that is always newer than the last.
+
+        Two edits inside one filesystem timestamp tick are indistinguishable,
+        which is a real thing to do while getting a layout right. Stamping from
+        a counter rather than the clock keeps these tests about the reload
+        logic instead of about timer resolution -- and an earlier version that
+        nudged the clock forward by a millisecond made the *second* write land
+        before the first, which is exactly the kind of flake this avoids.
+        """
+        path.write_text(text, encoding="utf-8")
+        stamp = _BASE_NS + next(_TICKS) * 1_000_000_000
+        os.utime(path, ns=(stamp, stamp))
+
+    def test_an_unchanged_file_is_not_reread(self, tmp_path: Path) -> None:
+        path = tmp_path / "d.yaml"
+        self.write(path, "root:\n  type: label\n  text: one\n")
+        dashboard = Dashboard.load(path)
+
+        assert dashboard.reload_if_changed() is False
+        assert find(dashboard.root, Label).text == "one"
+
+    def test_a_changed_file_is_picked_up(self, tmp_path: Path) -> None:
+        path = tmp_path / "d.yaml"
+        self.write(path, "root:\n  type: label\n  text: one\n")
+        dashboard = Dashboard.load(path)
+
+        self.write(path, "root:\n  type: label\n  text: two\n")
+        assert dashboard.reload_if_changed() is True
+        assert find(dashboard.root, Label).text == "two"
+
+    def test_the_object_survives_the_reload(self, tmp_path: Path) -> None:
+        # The whole point: whoever is holding this keeps holding it.
+        path = tmp_path / "d.yaml"
+        self.write(path, "root:\n  type: label\n  text: one\n")
+        dashboard = Dashboard.load(path)
+
+        self.write(path, "root:\n  type: label\n  text: two\n")
+        dashboard.reload_if_changed()
+        assert dashboard.source_path == path
+
+    def test_new_entities_are_reported(self, tmp_path: Path) -> None:
+        # A caller subscribing to entity_ids has to know they moved.
+        path = tmp_path / "d.yaml"
+        self.write(path, 'root:\n  type: label\n  text: "{{ sensor.a }}"\n')
+        dashboard = Dashboard.load(path)
+        assert dashboard.entity_ids == {"sensor.a"}
+
+        self.write(path, 'root:\n  type: label\n  text: "{{ sensor.b }}"\n')
+        dashboard.reload_if_changed()
+        assert dashboard.entity_ids == {"sensor.b"}
+
+    def test_a_broken_edit_leaves_the_last_good_one_running(self, tmp_path: Path) -> None:
+        # An edit that does not parse must not blank the panel.
+        path = tmp_path / "d.yaml"
+        self.write(path, "root:\n  type: label\n  text: one\n")
+        dashboard = Dashboard.load(path)
+
+        self.write(path, "root:\n  type: nonsense\n")
+        with pytest.raises(DashboardConfigError):
+            dashboard.reload_if_changed()
+
+        assert find(dashboard.root, Label).text == "one"
+
+    def test_a_broken_edit_is_retried_after_it_is_fixed(self, tmp_path: Path) -> None:
+        # The stamp is only advanced on success, so a fixed file is noticed.
+        path = tmp_path / "d.yaml"
+        self.write(path, "root:\n  type: label\n  text: one\n")
+        dashboard = Dashboard.load(path)
+
+        self.write(path, "root:\n  type: nonsense\n")
+        with pytest.raises(DashboardConfigError):
+            dashboard.reload_if_changed()
+
+        self.write(path, "root:\n  type: label\n  text: three\n")
+        assert dashboard.reload_if_changed() is True
+        assert find(dashboard.root, Label).text == "three"
+
+    def test_an_inline_dashboard_never_reloads(self) -> None:
+        dashboard = Dashboard.from_yaml("root:\n  type: label\n  text: one\n")
+        assert dashboard.source_path is None
+        assert dashboard.reload_if_changed() is False
+
+    def test_a_deleted_file_is_not_an_error(self, tmp_path: Path) -> None:
+        # Editors write by rename, so the file can briefly not exist. Keeping
+        # the last good dashboard beats blanking the panel over a save.
+        path = tmp_path / "d.yaml"
+        self.write(path, "root:\n  type: label\n  text: one\n")
+        dashboard = Dashboard.load(path)
+
+        path.unlink()
+        assert dashboard.reload_if_changed() is False
+        assert find(dashboard.root, Label).text == "one"
