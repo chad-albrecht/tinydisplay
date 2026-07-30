@@ -91,11 +91,14 @@ def make_panel_like_the_s1(root: Path) -> Path:
     """The interface layout the AceMagic S1 actually reports.
 
     Three HID interfaces: an IN-only one, a bare OUT one with no kernel driver
-    bound, and one with both. Taken from a real ``ht32_usbfs_preflight`` run on
-    Home Assistant OS 18.1, which is what makes it worth pinning.
+    bound, and one with both. Transcribed from a real
+    ``ht32_usbfs_preflight`` run against the panel in an AceMagic S1 on Home
+    Assistant OS 18.1 -- including that if00's IN endpoint is 8 bytes while the
+    rest are 64, which is what makes the two OUT endpoints tie and the
+    tie-break decide the answer.
     """
     device = make_device(root, "1-8", vendor="04d9", product="fd01", bus=1, devnum=6)
-    make_interface(device, 0, endpoints=[("81", "03", "0040")])
+    make_interface(device, 0, endpoints=[("81", "03", "0008")])
     make_interface(device, 1, endpoints=[("02", "03", "0040")])
     make_interface(device, 2, endpoints=[("04", "03", "0040"), ("83", "03", "0040")])
     return device
