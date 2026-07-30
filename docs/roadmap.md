@@ -186,30 +186,42 @@ Deliberately absent: recorder history (a sparkline shows what it has seen since
 the panel started), touch and button input, and any entity published back to
 Home Assistant.
 
-**Not yet run in Home Assistant.** Phase 3 reached the panel from an *add-on*
-container, which asks for `usb`, `udev` and `full_access` and needs Protection
-Mode off. An integration runs in the *Core* container instead and cannot
-request any of that, so every permission the driver relies on had to be
-re-established there.
+**Verified on hardware.** Home Assistant OS 18.1, Core 2026.7.4, an AceMagic
+S1's built-in panel: installed through HACS, configured through the config
+flow, drawing live entity state onto the panel the right way up, from inside
+the Core container.
 
-Core does see `/dev/bus/usb` — confirmed on Home Assistant OS 18.1 — which
-settles the question that would have sunk this design outright. What is left is
-whether it can *write* to the node and detach `usbhid`, since the nodes are
-`crw-rw-r--` and a listing proves neither.
-[`tools/ht32_usbfs_preflight.py`](../tools/ht32_usbfs_preflight.py) answers
-that: standard library only, so it runs inside Core where nothing is installed,
-and pinned to the driver's own discovery by a test so its answer is an answer
-about `tinydisplay-ht32`.
+Getting there had to re-establish a permission the driver had only ever been
+granted elsewhere. Phase 3 reached the panel from an *add-on* container, which
+asks for `usb`, `udev` and `full_access` and needs Protection Mode off; an
+integration runs in the *Core* container and can request none of that. Core
+turned out to both see and write `/dev/bus/usb`, which was the question that
+would have sunk this design outright.
+[`tools/ht32_usbfs_preflight.py`](../tools/ht32_usbfs_preflight.py) answers it
+in one command: standard library only, so it runs inside Core where nothing is
+installed, and pinned to the driver's own discovery by a test so its answer is
+an answer about `tinydisplay-ht32`. Had write access been absent, the fix would
+not have been configuration -- the panel would have had to be driven by a
+process that can hold those privileges, talking to Home Assistant over its API.
+Everything below `custom_components/` would have survived that unchanged, which
+is the argument for having put the `StateSource` seam where it is.
 
-If write access turns out to be absent, the fix is not configuration — the
-panel would have to be driven by a process that can hold those privileges,
-talking to Home Assistant over its API rather than rendering in-process.
-Everything below `custom_components/` survives that unchanged, which is the
-argument for having put the `StateSource` seam where it is.
+Two things bring-up corrected, both of which had looked like integration bugs:
 
-Second, and merely tedious: the packages the manifest pins are not on PyPI, so
-the requirement has to be satisfied by building wheels into `/config/deps` by
-hand. See [the integration's README](../custom_components/tinydisplay/README.md).
+- **The panel is mounted upside down**, and its orientation command is inert.
+  The driver turns each frame half a revolution before encoding. Phase 3's
+  colour-bar check could not have noticed -- vertical bars are symmetric top to
+  bottom -- which is why a `corners` pattern now exists.
+- **Dependencies must be installed the way Home Assistant installs its own**,
+  with `PYTHONUSERBASE` and `pip install --user`. A `--target` install lands
+  one directory above where it looks, and reports success from every angle
+  except the one that matters.
+
+Still open: uptime beyond minutes, reconnection after a replug, and the options
+flow, reload and unload paths -- all unit-tested, none exercised against
+hardware. And the packages the manifest pins are not on PyPI, so they must be
+installed by hand. See
+[the integration's README](../custom_components/tinydisplay/README.md).
 
 ## Beyond
 

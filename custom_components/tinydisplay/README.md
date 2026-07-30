@@ -300,29 +300,29 @@ versions in the workspace.
 
 ## Status
 
-Working and covered by tests:
+**Confirmed on hardware.** Home Assistant OS 18.1, Core 2026.7.4, an AceMagic
+S1's built-in panel. Installed through HACS, configured through the config
+flow, drawing a dashboard from live entity state onto the panel the right way
+up, driven from inside the Core container.
 
-- Dashboard parsing, validation and error reporting.
-- Templating, entity binding, and the change-driven render loop.
-- The manifest, translations and HACS metadata.
+That establishes the chain end to end: the config flow and its validation,
+`async_setup_entry`, driver construction and connection, the `hass.states`
+adapter, the entity subscriptions, the change-driven render loop, the
+keep-alive, and the 180° rotation the panel's mounting requires.
 
-Blocking a real test, in order:
+**Not established.** Everything about the long run:
 
-1. **Partly answered: the Core container can see `/dev/bus/usb`.** Confirmed on
-   Home Assistant OS 18.1. Whether it can *write* to the node and detach
-   `usbhid` is what the preflight in [Before you start](#before-you-start)
-   establishes; bring-up used an add-on with privileges an integration cannot
-   request, so none of it can be assumed.
-2. **The packages in `manifest.json` are not on PyPI**, so neither HACS nor a
-   manual copy can satisfy the requirement. Build the wheels and install them
-   into `/config/deps` by hand until they are published.
-3. **This integration has never run inside a live Home Assistant.** Everything
-   below it has. The config flow, the setup path and the `hass.states` adapter
-   are structurally checked — the manifest, the translations and the import
-   boundaries are asserted by the test suite — but none of them have been
-   executed, because doing so needs Home Assistant installed and this
-   workspace deliberately does not depend on it.
+- Uptime beyond minutes. Whether the keep-alive holds the disconnection banner
+  off for hours is still the open question it was in Phase 3.
+- Reconnection after the panel is replugged, and the driver's retry path.
+- The options flow, entry reload and entry unload. All unit-tested, none run
+  against hardware.
 
-Also absent, but not blocking: no entities are published back to Home
-Assistant, and there is no service to reload a dashboard without reloading the
-entry.
+**Rough edges.**
+
+- The packages in `manifest.json` are not on PyPI, so they must be installed by
+  hand — and in a specific way; see [Installation](#installation).
+- No entities or device are published back to Home Assistant, so nothing in the
+  UI tells you whether the panel is being drawn to. The logs are currently the
+  only answer.
+- No service to reload a dashboard without reloading the entry.

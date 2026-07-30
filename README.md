@@ -12,12 +12,16 @@ device.
 > bring-up pattern which had "verified" Phase 3 was structurally unable to
 > notice either.
 >
-> The Home Assistant **integration** has still never been run. The library
-> beneath it has, end to end, on the panel. What remains is the config flow and
-> the setup path, plus the fact that the packages the manifest pins are not on
-> PyPI, so the requirement has to be satisfied by hand.
-> [Before you start](custom_components/tinydisplay/README.md#before-you-start)
-> covers both.
+> The Home Assistant **integration** now runs: installed through HACS,
+> configured through its config flow, and drawing a dashboard onto that panel
+> from entity state, the right way up. What is not yet established is anything
+> about the long run — hours of uptime, reconnection after a replug, the
+> options flow, reload and unload. Those paths exist and are unit-tested; none
+> has been exercised against hardware.
+>
+> The one rough edge for anyone else: the packages the manifest pins are not on
+> PyPI, so they have to be installed by hand first, and in a particular way.
+> [The integration's README](custom_components/tinydisplay/README.md) covers it.
 
 ## Why
 
