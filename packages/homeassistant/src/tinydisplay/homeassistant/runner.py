@@ -17,6 +17,11 @@ that honest:
   dashboard whose entities are all unavailable still shows a live picture
   rather than a stale one.
 
+A dashboard with several screens adds a third deadline. Rotation asks for a
+repaint through the same event a state change uses rather than drawing
+directly, so it is rate-limited by ``min_interval`` like everything else and
+there is only ever one path to the panel.
+
 **Keep-alives are a parameter, not a feature of the loop.** The HT32's firmware
 paints a disconnection banner over the screen when it stops hearing from the
 host, so its driver has a ``heartbeat`` method that has to be called about once
@@ -152,12 +157,28 @@ async def run_dashboard(
         last_frame = loop.time() - max(min_interval, 1.0)
         signal.set()
 
+        # Read once: a hot reload can change it, and a rotation deadline that
+        # moved underneath the loop would be harder to reason about than one
+        # that settles on the next pass.
+        rotate_every = dashboard.rotate_every
+        next_rotation = loop.time() + rotate_every if rotate_every else None
+
         while max_frames is None or frames < max_frames:
             now = loop.time()
 
             if next_beat is not None and now >= next_beat and keepalive is not None:
                 await keepalive()
                 next_beat = loop.time() + keepalive_interval
+                continue
+
+            if next_rotation is not None and now >= next_rotation:
+                dashboard.advance()
+                # Through the same signal a state change uses, so a rotation
+                # is rate-limited by min_interval exactly as everything else
+                # is, rather than being a second way to reach the panel.
+                signal.set()
+                rotate_every = dashboard.rotate_every
+                next_rotation = now + rotate_every if rotate_every else None
                 continue
 
             due = _next_repaint(
@@ -190,7 +211,7 @@ async def run_dashboard(
                         on_frame(canvas)
                 continue
 
-            await _wait(signal, _earliest(due, next_beat), loop)
+            await _wait(signal, _earliest(due, next_beat, next_rotation), loop)
 
     return frames
 

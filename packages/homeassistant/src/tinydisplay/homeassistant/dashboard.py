@@ -76,13 +76,14 @@ class Dashboard:
     once and in one place.
     """
 
-    __slots__ = ("_built", "_source_path", "_spec", "_stamp")
+    __slots__ = ("_built", "_current", "_source_path", "_spec", "_stamp")
 
     def __init__(self, spec: DashboardSpec, *, source_path: Path | None = None) -> None:
         self._spec = spec
         self._built = build_dashboard(spec)
         self._source_path = source_path
         self._stamp = _modified_at(source_path)
+        self._current = 0
 
     # -- Construction ------------------------------------------------------
 
@@ -126,8 +127,56 @@ class Dashboard:
 
     @property
     def root(self) -> Widget:
-        """The top of the widget tree."""
-        return self._built.root
+        """The top of the widget tree currently on show."""
+        return self._built.screens[self._current].root
+
+    # -- Screens -----------------------------------------------------------
+
+    @property
+    def screen_count(self) -> int:
+        """How many screens this dashboard cycles through. Always at least one."""
+        return len(self._built.screens)
+
+    @property
+    def current_screen(self) -> int:
+        """Which screen is on show, counting from zero."""
+        return self._current
+
+    @property
+    def screen_name(self) -> str | None:
+        """What the document called the screen on show, if anything."""
+        return self._built.screens[self._current].name
+
+    @property
+    def rotate_every(self) -> float | None:
+        """Seconds between screens, or ``None`` to hold the first one.
+
+        ``None`` for a single-screen dashboard however the document was
+        written: rotating through one screen is a repaint on a timer, which is
+        what ``max_interval`` is for.
+        """
+        return self._spec.rotate_every if self._spec.rotates else None
+
+    def advance(self) -> int:
+        """Move to the next screen, wrapping. Returns the new index.
+
+        Only changes which tree is drawn. Every screen is kept current by
+        :meth:`update` whether or not it is showing, so the one arriving is
+        already up to date rather than a snapshot of whenever it was last seen.
+        """
+        self._current = (self._current + 1) % self.screen_count
+        return self._current
+
+    def show_screen(self, index: int) -> None:
+        """Jump to a screen by index.
+
+        Raises:
+            IndexError: If there is no such screen.
+        """
+        if not 0 <= index < self.screen_count:
+            msg = f"no screen {index}; this dashboard has {self.screen_count}"
+            raise IndexError(msg)
+        self._current = index
 
     @property
     def theme(self) -> Theme:
@@ -158,14 +207,18 @@ class Dashboard:
     def is_static(self) -> bool:
         """Whether anything in this dashboard can change.
 
-        A dashboard with no updaters draws the same pixels forever, which is
-        worth knowing before scheduling a render loop for it.
+        False for a rotating dashboard even if every screen is fixed text: the
+        picture on the panel still changes, which is what a caller deciding
+        whether to run a render loop is actually asking about.
         """
-        return not self._built.updaters
+        return not self._built.updaters and self.rotate_every is None
 
     def __repr__(self) -> str:
         where = f", {self._source_path}" if self._source_path is not None else ""
-        return f"Dashboard({self._spec.theme_name}, {len(self.entity_ids)} entities{where})"
+        screens = f", {self.screen_count} screens" if self.screen_count > 1 else ""
+        return (
+            f"Dashboard({self._spec.theme_name}, {len(self.entity_ids)} entities{screens}{where})"
+        )
 
     # -- Rendering ---------------------------------------------------------
 
@@ -187,9 +240,10 @@ class Dashboard:
         the layout containers ignore a resize to the size they already have,
         so this costs nothing on the frames where nothing moved.
         """
+        root = self.root
         canvas.clear(self.background)
-        self._built.root.bounds = Rect(0, 0, canvas.width, canvas.height)
-        self._built.root.draw(canvas)
+        root.bounds = Rect(0, 0, canvas.width, canvas.height)
+        root.draw(canvas)
 
     def reload_if_changed(self) -> bool:
         """Re-read the file if it has changed on disk. Returns whether it did.
@@ -223,6 +277,10 @@ class Dashboard:
         self._spec = spec
         self._built = build_dashboard(spec)
         self._stamp = stamp
+        # An edit that removes screens can leave the index past the end. Hold
+        # position where it still exists, so editing screen three does not
+        # yank the panel back to screen one on every save.
+        self._current = min(self._current, self.screen_count - 1)
         return True
 
     def render(self, canvas: Canvas, source: StateSource) -> None:

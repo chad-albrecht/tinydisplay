@@ -53,28 +53,57 @@ type Updater = Callable[[StateSource], None]
 
 
 @dataclass(frozen=True, slots=True)
-class BuiltDashboard:
-    """A widget tree and everything needed to keep it current.
+class BuiltScreen:
+    """One screen's widget tree, and what keeps it current.
 
     Attributes:
         root: The top-level widget. Its bounds are assigned by the caller,
             because only the caller knows how big the panel is.
-        updaters: Applied in :meth:`update` to bring the tree in line with the
-            current entity state.
+        updaters: Applied to bring this screen in line with entity state.
+        name: What the document called it, for logs and diagnostics.
     """
 
     root: Widget
     updaters: tuple[Updater, ...]
+    name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class BuiltDashboard:
+    """Every screen of a dashboard, built and ready to draw.
+
+    Attributes:
+        screens: In document order. Always at least one.
+    """
+
+    screens: tuple[BuiltScreen, ...]
+
+    @property
+    def root(self) -> Widget:
+        """The first screen's root, for callers that predate screens."""
+        return self.screens[0].root
+
+    @property
+    def updaters(self) -> tuple[Updater, ...]:
+        """Every screen's updaters, in order."""
+        return tuple(updater for screen in self.screens for updater in screen.updaters)
 
     def update(self, source: StateSource) -> None:
-        """Push the current entity state into every bound widget.
+        """Push the current entity state into every bound widget, on every screen.
+
+        Every screen, not just the visible one. A sparkline on the screen that
+        is not showing would otherwise accumulate a gap for exactly as long as
+        it was hidden, and come back with a history that lies about what
+        happened. Updaters are closures over a widget and a reference, so the
+        cost of keeping the hidden ones current is a dictionary lookup each.
 
         Never raises on account of the data: every updater reads through a
         reference that renders missing values as placeholders. A dashboard
         going quiet is a panel showing dashes, not a stopped render loop.
         """
-        for updater in self.updaters:
-            updater(source)
+        for screen in self.screens:
+            for updater in screen.updaters:
+                updater(source)
 
 
 # ---------------------------------------------------------------------------
@@ -373,21 +402,30 @@ def build_node(
 
 
 def build_dashboard(spec: DashboardSpec) -> BuiltDashboard:
-    """Build the widget tree a dashboard describes.
+    """Build every screen a dashboard describes.
 
-    The tree has no bounds yet -- assigning those needs a canvas, and a
+    The trees have no bounds yet -- assigning those needs a canvas, and a
     dashboard is deliberately not tied to one panel size.
+
+    Each screen gets its own widget tree rather than a shared one that is
+    reconfigured on rotation. Rebuilding on every rotation would throw away the
+    cached layout and the sparkline history that make building-once worth
+    doing, and a panel with three screens is three small trees, not a memory
+    problem.
 
     Example:
         >>> from tinydisplay.homeassistant import build_dashboard, parse_dashboard
         >>> spec = parse_dashboard({"root": {"type": "label", "text": "{{ sensor.a }}"}})
         >>> built = build_dashboard(spec)
-        >>> len(built.updaters)
-        1
+        >>> len(built.screens), len(built.updaters)
+        (1, 1)
     """
-    updaters: list[Updater] = []
-    root = build_node(spec.root, spec.theme, spec.unavailable, updaters)
-    return BuiltDashboard(root=root, updaters=tuple(updaters))
+    screens = []
+    for screen in spec.screens:
+        updaters: list[Updater] = []
+        root = build_node(screen.root, spec.theme, spec.unavailable, updaters)
+        screens.append(BuiltScreen(root=root, updaters=tuple(updaters), name=screen.name))
+    return BuiltDashboard(screens=tuple(screens))
 
 
 #: An empty state source, used to render constant templates at build time. A

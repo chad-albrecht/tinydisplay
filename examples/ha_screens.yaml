@@ -1,0 +1,102 @@
+# A rotating dashboard: three screens, ten seconds each.
+#
+# Preview it with no Home Assistant and no hardware:
+#
+#     uv run python -m tinydisplay.simulator examples/ha_simulator_dashboard.py
+#
+# ...after pointing that example's DASHBOARD_PATH at this file. Or hand it to
+# the integration, which rotates it on the panel.
+#
+# Every screen updates on every cycle, not just the one showing, so the
+# sparkline on screen two has a continuous history rather than a gap for
+# however long screens one and three were up.
+
+theme: midnight
+rotate_every: 10
+
+screens:
+  - name: Sun
+    root:
+      type: stack
+      axis: vertical
+      spacing: 6
+      padding: 10
+      children:
+        - type: label
+          size: 20
+          text: Sun elevation
+          color: muted
+          wrap: false
+        - type: label
+          weight: 2
+          text: "{{ sun.sun.elevation | round(1) }} deg"
+          color: accent
+          font_size: 44
+          align: center
+          valign: middle
+          wrap: false
+          shrink_to_fit: true
+        - type: label
+          size: 20
+          text: "{{ sun.sun | replace(_, ' ') | title }}"
+          color: muted
+          align: center
+          wrap: false
+
+  - name: Trend
+    root:
+      type: stack
+      axis: vertical
+      spacing: 6
+      padding: 10
+      children:
+        - type: label
+          size: 20
+          text: Elevation over time
+          color: muted
+          wrap: false
+        - type: sparkline
+          value: "{{ sun.sun.elevation | round(2) }}"
+          color: accent
+          capacity: 120
+
+  - name: Status
+    root:
+      type: grid
+      rows: 2
+      columns: 2
+      spacing: 6
+      padding: 10
+      children:
+        - type: label
+          row: 0
+          column: 0
+          text: Daylight
+          color: muted
+          valign: middle
+          wrap: false
+        - type: icon
+          row: 0
+          column: 1
+          icon: circle
+          thickness: 3
+          entity: sun.sun
+          color:
+            above_horizon: warning
+            below_horizon: muted
+            default: danger
+        - type: label
+          row: 1
+          column: 0
+          text: Azimuth
+          color: muted
+          valign: middle
+          wrap: false
+        - type: label
+          row: 1
+          column: 1
+          text: "{{ sun.sun.azimuth | round(0) }}"
+          color: accent
+          valign: middle
+          align: right
+          wrap: false

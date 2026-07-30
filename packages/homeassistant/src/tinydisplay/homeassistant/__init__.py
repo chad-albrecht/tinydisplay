@@ -49,7 +49,12 @@ Example:
 
 from __future__ import annotations
 
-from tinydisplay.homeassistant.build import BuiltDashboard, build_dashboard, build_node
+from tinydisplay.homeassistant.build import (
+    BuiltDashboard,
+    BuiltScreen,
+    build_dashboard,
+    build_node,
+)
 from tinydisplay.homeassistant.dashboard import Dashboard
 from tinydisplay.homeassistant.errors import (
     DashboardConfigError,
@@ -69,6 +74,7 @@ from tinydisplay.homeassistant.schema import (
     DashboardSpec,
     Insets,
     NodeSpec,
+    ScreenSpec,
     ValueRef,
     load_dashboard,
     parse_dashboard,
@@ -92,7 +98,7 @@ from tinydisplay.homeassistant.template import (
     template_entity_ids,
 )
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "DEFAULT_KEEPALIVE_INTERVAL",
@@ -106,6 +112,7 @@ __all__ = [
     "UNAVAILABLE_TEXT",
     "UNKNOWN",
     "BuiltDashboard",
+    "BuiltScreen",
     "ColorRef",
     "Dashboard",
     "DashboardConfigError",
@@ -114,6 +121,7 @@ __all__ = [
     "HomeAssistantError",
     "Insets",
     "NodeSpec",
+    "ScreenSpec",
     "StateSource",
     "StaticStateSource",
     "Template",

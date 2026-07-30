@@ -13,6 +13,7 @@ real rather than mocked. The loop's contract is small and worth stating:
 from __future__ import annotations
 
 import asyncio
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -22,6 +23,7 @@ from tinydisplay.homeassistant import (
     Dashboard,
     HomeAssistantError,
     StaticStateSource,
+    parse_dashboard,
     run_dashboard,
 )
 
@@ -73,13 +75,20 @@ class Recorder:
 class ExplodingDashboard:
     """A dashboard that fails a fixed number of times, then works.
 
-    Not a mock of :class:`Dashboard` -- it satisfies the one method the loop
-    calls, which is the whole surface the loop depends on.
+    Not a mock of :class:`Dashboard` -- it implements exactly the surface the
+    loop depends on, which is `render`, `rotate_every` and `advance`. When that
+    list grows this stub stops working, which is the point: the loop's
+    requirements on a dashboard should be small enough to write down here.
     """
+
+    rotate_every: float | None = None
 
     def __init__(self, failures: int) -> None:
         self.remaining = failures
         self.renders = 0
+
+    def advance(self) -> int:
+        return 0
 
     def render(self, canvas: Canvas, source: StateSource) -> None:
         del canvas, source
@@ -471,3 +480,122 @@ class TestFrameHook:
         self, driver: MemoryDriver, dashboard: Dashboard, source: StaticStateSource
     ) -> None:
         assert await run_dashboard(driver, dashboard, source, max_frames=1) == 1
+
+
+class TestRotation:
+    """Cycling screens on a timer, as a third deadline in the loop.
+
+    Rotation asks for a repaint through the same event a state change uses, so
+    there is only ever one path to the panel and `min_interval` still governs
+    how often it is taken.
+    """
+
+    def rotating(self, seconds: float) -> Dashboard:
+        """A two-screen dashboard rotating faster than a document may ask for.
+
+        The schema floors `rotate_every` at half a second, because anything
+        quicker is a mistake in a document rather than a preference. The loop
+        has no such opinion, and testing it at document speed would mean
+        seconds of sleeping per assertion -- so the spec is built through the
+        parser and then relaxed, which exercises the loop without weakening
+        the rule that protects real dashboards.
+        """
+        spec = parse_dashboard(
+            {
+                "rotate_every": 1,
+                "screens": [
+                    {"name": "one", "root": {"type": "label", "text": "one"}},
+                    {"name": "two", "root": {"type": "label", "text": "two"}},
+                ],
+            }
+        )
+        return Dashboard(replace(spec, rotate_every=seconds))
+
+    async def test_the_screen_advances_on_the_interval(
+        self, driver: MemoryDriver, source: StaticStateSource
+    ) -> None:
+        dashboard = self.rotating(TICK * 2)
+        assert dashboard.screen_name == "one"
+
+        await run_dashboard(
+            driver,
+            dashboard,
+            source,
+            min_interval=0.0,
+            max_interval=None,
+            max_frames=2,
+        )
+        assert dashboard.screen_name == "two"
+
+    async def test_it_wraps_back_round(
+        self, driver: MemoryDriver, source: StaticStateSource
+    ) -> None:
+        dashboard = self.rotating(TICK)
+        await run_dashboard(
+            driver,
+            dashboard,
+            source,
+            min_interval=0.0,
+            max_interval=None,
+            max_frames=3,
+        )
+        assert dashboard.current_screen == 0
+
+    async def test_each_screen_reaches_the_panel(
+        self, driver: MemoryDriver, source: StaticStateSource
+    ) -> None:
+        # Different screens draw different pixels, which is the end-to-end
+        # proof that rotation is doing something rather than just counting.
+        dashboard = self.rotating(TICK)
+        await run_dashboard(
+            driver,
+            dashboard,
+            source,
+            min_interval=0.0,
+            max_interval=None,
+            max_frames=2,
+        )
+        assert driver.frames[0] != driver.frames[1]
+
+    async def test_a_still_dashboard_never_advances(
+        self, driver: MemoryDriver, dashboard: Dashboard, source: StaticStateSource
+    ) -> None:
+        # One screen and no rotate_every: the loop must not invent a deadline.
+        assert dashboard.rotate_every is None
+        await run_dashboard(
+            driver, dashboard, source, min_interval=0.0, max_interval=TICK, max_frames=3
+        )
+        assert dashboard.current_screen == 0
+
+    async def test_rotation_respects_the_minimum_interval(
+        self, driver: MemoryDriver, source: StaticStateSource
+    ) -> None:
+        # Rotation goes through the repaint signal, so it is rate-limited like
+        # everything else rather than being a second way to reach the panel.
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await run_dashboard(
+            driver,
+            self.rotating(0.0001),
+            source,
+            min_interval=TICK * 3,
+            max_interval=None,
+            max_frames=2,
+        )
+        assert loop.time() - started >= TICK * 3
+
+    async def test_keepalives_still_fit_between_rotations(
+        self, driver: MemoryDriver, source: StaticStateSource
+    ) -> None:
+        recorder = Recorder()
+        await run_dashboard(
+            driver,
+            self.rotating(TICK * 8),
+            source,
+            keepalive=recorder.keepalive,
+            keepalive_interval=TICK,
+            min_interval=0.0,
+            max_interval=None,
+            max_frames=2,
+        )
+        assert recorder.events.count("keepalive") > 2

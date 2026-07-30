@@ -66,6 +66,48 @@ root:
       warning_at: 0.8
 ```
 
+### Several screens
+
+A dashboard can cycle through screens instead of showing one:
+
+```yaml
+theme: midnight
+rotate_every: 10          # seconds; omit to hold the first screen
+
+screens:
+  - name: Living room
+    root:
+      type: label
+      text: "{{ sensor.living_room_temperature | round(1) }}"
+
+  - name: System
+    root:
+      type: gauge
+      entity: sensor.processor_use
+      max: 100
+```
+
+Use `root:` for one screen or `screens:` for several — never both. Every
+dashboard written before screens existed keeps working unchanged, because a
+bare `root:` simply *is* a dashboard of one screen.
+
+`rotate_every` lives in the document rather than in the integration's options,
+so the file describes the whole dashboard: copy it to another panel and the
+rotation comes with it. Hot reload picks up a change within a few seconds, so
+adjusting it is edit-and-save. The floor is half a second, and it is ignored
+entirely when there is only one screen — rotating through one screen is a
+repaint on a timer, which is what `max_interval` already does.
+
+Two behaviours worth knowing:
+
+**Every screen updates, only the current one draws.** A sparkline on a hidden
+screen keeps collecting samples, so it comes back with a history that reflects
+what actually happened rather than a gap for however long it was away.
+
+**`entity_ids` is the union across screens.** The render loop subscribes once,
+so a sensor appearing only on screen three still wakes it — otherwise that
+screen would show whatever the sensor said the last time it happened to be up.
+
 **Unknown keys are errors**, and errors carry a path:
 
 ```text
@@ -90,8 +132,15 @@ renders perfectly while quietly ignoring the `color:` you spelled `colour:`.
 | `spacer` | Occupies space | — |
 
 Every node also accepts `name`, `visible`, `padding`, and the layout hints its
-parent reads: `size`, `weight`, `align`, `cross_size` inside a `stack`; `row`,
-`column`, `row_span`, `column_span` inside a `grid`.
+parent reads: `size`, `weight`, `cross_align`, `cross_size` inside a `stack`;
+`row`, `column`, `row_span`, `column_span` inside a `grid`.
+
+The cross-axis hint is `cross_align`, not `align`, because a `label` already
+spends `align` on its text. When both were spelled the same, one key was parsed
+by two different enums and only the value they happened to share — `center` —
+was accepted on a label at all; `align: left` was rejected with a message about
+`start` and `stretch`. `cross_align` also reads better beside `cross_size`,
+which is the axis it acts on.
 
 `padding` is either a number or a mapping of `all` / `horizontal` / `vertical`
 / `left` / `top` / `right` / `bottom`.

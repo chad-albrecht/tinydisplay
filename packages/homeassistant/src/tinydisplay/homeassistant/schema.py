@@ -75,6 +75,7 @@ __all__ = [
     "DashboardSpec",
     "Insets",
     "NodeSpec",
+    "ScreenSpec",
     "ValueRef",
     "load_dashboard",
     "parse_dashboard",
@@ -95,8 +96,12 @@ _CONTAINER_TYPES: Final[frozenset[str]] = frozenset({"stack", "grid"})
 #: Layout hints every node accepts. Read by whichever container holds the node;
 #: a ``row`` on a child of a stack is meaningless but harmless, and rejecting
 #: it would mean the validator had to know its parent.
+#: ``cross_align`` rather than ``align`` because a label already spends
+#: ``align`` on its text, and one key parsed by two enums meant only the value
+#: they happened to share -- ``center`` -- was accepted on a label at all. It
+#: pairs with ``cross_size``, which is the axis it acts on.
 _LAYOUT_KEYS: Final[frozenset[str]] = frozenset(
-    {"size", "weight", "align", "cross_size", "row", "column", "row_span", "column_span"}
+    {"size", "weight", "cross_align", "cross_size", "row", "column", "row_span", "column_span"}
 )
 
 #: Keys every node accepts regardless of type.
@@ -311,31 +316,70 @@ def _referenced_entities(value: Any) -> frozenset[str]:
 
 
 @dataclass(frozen=True, slots=True)
+class ScreenSpec:
+    """One screen of a dashboard.
+
+    A dashboard with a bare ``root`` has exactly one of these, unnamed. The
+    name is only ever shown in logs and diagnostics -- a panel this size has no
+    room to label itself, and a screen that spent pixels saying which screen it
+    was would be a poor trade.
+    """
+
+    root: NodeSpec
+    name: str | None = None
+
+    @property
+    def entity_ids(self) -> frozenset[str]:
+        """Every entity this screen reads."""
+        return self.root.entity_ids
+
+
+@dataclass(frozen=True, slots=True)
 class DashboardSpec:
     """A whole dashboard definition.
 
     Attributes:
-        root: The top-level node.
+        screens: The screens, in the order they are shown. Always at least one.
         theme: The palette, already quantised for the target panel.
         theme_name: The name it was chosen by, for logs and diagnostics.
         background: What to clear the canvas to before drawing.
         unavailable: Placeholder text for values that cannot be read.
+        rotate_every: Seconds between screens, or ``None`` to hold the first
+            one. Ignored when there is only one screen, because rotating
+            through a single screen is just a repaint on a timer -- which
+            ``max_interval`` already does, and better.
     """
 
-    root: NodeSpec
+    screens: tuple[ScreenSpec, ...]
     theme: Theme
     theme_name: str
     background: ColorRef
     unavailable: str = UNAVAILABLE_TEXT
+    rotate_every: float | None = None
+
+    @property
+    def root(self) -> NodeSpec:
+        """The first screen's root, for callers that predate screens."""
+        return self.screens[0].root
 
     @property
     def entity_ids(self) -> frozenset[str]:
-        """Every entity this dashboard reads.
+        """Every entity this dashboard reads, across every screen.
 
-        The render loop subscribes to exactly this set, which is what makes it
-        change-driven rather than polled.
+        The union rather than the visible screen's, because the render loop
+        subscribes to this once: a sensor that only appears on screen three
+        still has to wake the loop, or that screen would show whatever it said
+        the last time it happened to be on display.
         """
-        return self.root.entity_ids | self.background.entity_ids
+        found = self.background.entity_ids
+        for screen in self.screens:
+            found |= screen.entity_ids
+        return found
+
+    @property
+    def rotates(self) -> bool:
+        """Whether this dashboard cycles through more than one screen."""
+        return self.rotate_every is not None and len(self.screens) > 1
 
 
 # ---------------------------------------------------------------------------
@@ -611,8 +655,8 @@ def _layout_hints(mapping: Mapping[str, Any], path: str) -> dict[str, Any]:
         hints["weight"] = _number(mapping["weight"], _child_path(path, "weight"), minimum=0)
         if hints["weight"] <= 0:
             raise _fail(_child_path(path, "weight"), "must be greater than zero")
-    if "align" in mapping:
-        hints["align"] = _choice(mapping["align"], _child_path(path, "align"), _ALIGNS)
+    if "cross_align" in mapping:
+        hints["align"] = _choice(mapping["cross_align"], _child_path(path, "cross_align"), _ALIGNS)
     if "cross_size" in mapping:
         hints["cross_size"] = _integer(
             mapping["cross_size"], _child_path(path, "cross_size"), minimum=0
@@ -910,7 +954,7 @@ _NODE_PARSERS: Final[dict[str, _NodeParser]] = {
 # ---------------------------------------------------------------------------
 
 _DOCUMENT_KEYS: Final[frozenset[str]] = frozenset(
-    {"theme", "background", "root", "unavailable", "pixel_format"}
+    {"theme", "background", "root", "screens", "rotate_every", "unavailable", "pixel_format"}
 )
 
 #: Paths for document-level errors. Every other path is derived from a parent
@@ -918,6 +962,57 @@ _DOCUMENT_KEYS: Final[frozenset[str]] = frozenset(
 _DOCUMENT_PATH: Final = "dashboard"
 _THEME_PATH: Final = "theme"
 _BACKGROUND_PATH: Final = "background"
+
+_SCREENS_PATH: Final = "screens"
+_ROTATE_PATH: Final = "rotate_every"
+
+#: Keys a screen inside ``screens`` accepts.
+_SCREEN_KEYS: Final[frozenset[str]] = frozenset({"root", "name"})
+
+
+def _parse_screens(mapping: Mapping[str, Any]) -> tuple[ScreenSpec, ...]:
+    """Read either a bare ``root`` or a list of ``screens``.
+
+    Both spellings are supported and exactly one must be used. ``root`` came
+    first and every dashboard written so far uses it, so it keeps working
+    unchanged and simply means a dashboard of one screen -- there is no reason
+    to make somebody wrap a single screen in a list to say what they already
+    said.
+    """
+    has_root = "root" in mapping
+    has_screens = "screens" in mapping
+
+    if has_root and has_screens:
+        raise _fail(_DOCUMENT_PATH, "use either 'root' for one screen or 'screens' for several")
+    if not has_root and not has_screens:
+        raise _fail(_DOCUMENT_PATH, "needs a 'root' node, or a 'screens' list")
+
+    if has_root:
+        return (ScreenSpec(root=_parse_node(mapping["root"], "root")),)
+
+    raw = mapping["screens"]
+    if not isinstance(raw, list):
+        raise _fail(_SCREENS_PATH, f"expected a list, got {_describe(raw)}")
+    if not raw:
+        raise _fail(_SCREENS_PATH, "needs at least one screen")
+
+    return tuple(
+        _parse_screen(screen, _index_path(_SCREENS_PATH, index)) for index, screen in enumerate(raw)
+    )
+
+
+def _parse_screen(value: Any, path: str) -> ScreenSpec:
+    """Validate one entry of a ``screens`` list."""
+    mapping = _require_mapping(value, path)
+    _reject_unknown(mapping, _SCREEN_KEYS, path)
+
+    if "root" not in mapping:
+        raise _fail(path, "a screen needs a 'root' node")
+
+    return ScreenSpec(
+        root=_parse_node(mapping["root"], _child_path(path, "root")),
+        name=_string(mapping["name"], _child_path(path, "name")) if "name" in mapping else None,
+    )
 
 
 def parse_dashboard(document: Any) -> DashboardSpec:
@@ -943,9 +1038,7 @@ def parse_dashboard(document: Any) -> DashboardSpec:
     """
     mapping = _require_mapping(document, _DOCUMENT_PATH)
     _reject_unknown(mapping, _DOCUMENT_KEYS, "")
-
-    if "root" not in mapping:
-        raise _fail(_DOCUMENT_PATH, "needs a 'root' node")
+    screens = _parse_screens(mapping)
 
     theme_name = (
         _string(mapping["theme"], _THEME_PATH).lower() if "theme" in mapping else _DEFAULT_THEME
@@ -975,12 +1068,24 @@ def parse_dashboard(document: Any) -> DashboardSpec:
         else UNAVAILABLE_TEXT
     )
 
+    rotate_every = (
+        _number(mapping[_ROTATE_PATH], _ROTATE_PATH, minimum=0.5)
+        if _ROTATE_PATH in mapping
+        else None
+    )
+    if rotate_every is not None and len(screens) == 1:
+        # Not an error -- a dashboard being cut down to one screen while the
+        # key is left behind is ordinary -- but worth being explicit that it
+        # does nothing, since `max_interval` is what repaints a still screen.
+        rotate_every = None
+
     return DashboardSpec(
-        root=_parse_node(mapping["root"], "root"),
+        screens=screens,
         theme=theme,
         theme_name=theme_name,
         background=background,
         unavailable=unavailable,
+        rotate_every=rotate_every,
     )
 
 

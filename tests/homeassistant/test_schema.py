@@ -175,19 +175,38 @@ class TestLayoutHints:
         with pytest.raises(DashboardConfigError, match=r"root\.weight: must be greater than zero"):
             parse({"type": "spacer", "weight": 0})
 
-    def test_align_is_parsed(self) -> None:
-        assert parse({"type": "spacer", "align": "center"}).root.align is Align.CENTER
+    def test_cross_align_is_parsed(self) -> None:
+        assert parse({"type": "spacer", "cross_align": "center"}).root.align is Align.CENTER
 
-    def test_unknown_align_is_rejected(self) -> None:
-        with pytest.raises(DashboardConfigError, match=r"root\.align: unknown value 'middle'"):
-            parse({"type": "spacer", "align": "middle"})
+    def test_unknown_cross_align_is_rejected(self) -> None:
+        with pytest.raises(
+            DashboardConfigError, match=r"root\.cross_align: unknown value 'middle'"
+        ):
+            parse({"type": "spacer", "cross_align": "middle"})
+
+    def test_a_label_may_align_its_text_any_of_three_ways(self) -> None:
+        # The bug this rename fixes: `align` was read by both the label parser
+        # and the layout parser, so only `center` -- the one value both enums
+        # happened to share -- was accepted. `align: left` was impossible.
+        for value, expected in (
+            ("left", HorizontalAlign.LEFT),
+            ("center", HorizontalAlign.CENTER),
+            ("right", HorizontalAlign.RIGHT),
+        ):
+            spec = parse({"type": "label", "text": "hi", "align": value})
+            assert spec.root.options["align"] is expected
+
+    def test_text_and_layout_alignment_coexist(self) -> None:
+        spec = parse({"type": "label", "text": "hi", "align": "right", "cross_align": "end"})
+        assert spec.root.options["align"] is HorizontalAlign.RIGHT
+        assert spec.root.align is Align.END
 
     def test_spans_must_be_at_least_one(self) -> None:
         with pytest.raises(DashboardConfigError, match=r"root\.row_span: must be at least 1"):
             parse({"type": "spacer", "row_span": 0})
 
     def test_cross_size_is_parsed(self) -> None:
-        assert parse({"type": "spacer", "cross_size": 12, "align": "center"}).root.cross_size == 12
+        assert parse({"type": "spacer", "cross_size": 12}).root.cross_size == 12
 
     def test_negative_cross_size_is_rejected(self) -> None:
         with pytest.raises(DashboardConfigError, match=r"root\.cross_size: must be at least 0"):
@@ -575,3 +594,125 @@ class TestTypeErrors:
             }
         )
         assert spec.entity_ids == frozenset({"binary_sensor.door"})
+
+
+class TestScreens:
+    """Several screens in one document, cycled on a timer.
+
+    A dashboard written with a bare ``root`` is a dashboard of one screen, and
+    keeps working untouched -- there is no reason to make somebody wrap a
+    single screen in a list to say what they already said.
+    """
+
+    def test_a_bare_root_is_one_screen(self) -> None:
+        spec = parse({"type": "label", "text": "hi"})
+        assert len(spec.screens) == 1
+        assert spec.screens[0].name is None
+
+    def test_root_still_points_at_the_first_screen(self) -> None:
+        # Callers written before screens existed keep working.
+        spec = parse({"type": "label", "text": "hi"})
+        assert spec.root is spec.screens[0].root
+
+    def test_a_screens_list_is_parsed_in_order(self) -> None:
+        spec = parse_dashboard(
+            {
+                "screens": [
+                    {"name": "one", "root": {"type": "label", "text": "a"}},
+                    {"name": "two", "root": {"type": "label", "text": "b"}},
+                ]
+            }
+        )
+        assert [screen.name for screen in spec.screens] == ["one", "two"]
+
+    def test_a_screen_name_is_optional(self) -> None:
+        spec = parse_dashboard({"screens": [{"root": {"type": "spacer"}}]})
+        assert spec.screens[0].name is None
+
+    def test_entities_are_the_union_across_screens(self) -> None:
+        # The loop subscribes once, so a sensor that only appears on screen two
+        # still has to wake it -- or that screen shows whatever it said the
+        # last time it happened to be up.
+        spec = parse_dashboard(
+            {
+                "screens": [
+                    {"root": {"type": "label", "text": "{{ sensor.a }}"}},
+                    {"root": {"type": "label", "text": "{{ sensor.b }}"}},
+                ]
+            }
+        )
+        assert spec.entity_ids == frozenset({"sensor.a", "sensor.b"})
+
+    def test_rotate_every_is_read(self) -> None:
+        spec = parse_dashboard(
+            {
+                "rotate_every": 12,
+                "screens": [
+                    {"root": {"type": "spacer"}},
+                    {"root": {"type": "spacer"}},
+                ],
+            }
+        )
+        assert spec.rotate_every == 12.0
+        assert spec.rotates
+
+    def test_rotation_is_dropped_for_a_single_screen(self) -> None:
+        # Not an error -- cutting a dashboard down to one screen and leaving
+        # the key behind is ordinary -- but rotating through one screen is a
+        # repaint on a timer, which is what max_interval is for.
+        spec = parse_dashboard({"rotate_every": 5, "root": {"type": "spacer"}})
+        assert spec.rotate_every is None
+        assert not spec.rotates
+
+    def test_no_rotation_by_default(self) -> None:
+        spec = parse_dashboard(
+            {"screens": [{"root": {"type": "spacer"}}, {"root": {"type": "spacer"}}]}
+        )
+        assert spec.rotate_every is None
+        assert not spec.rotates
+
+    def test_root_and_screens_together_are_rejected(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"either 'root' .* or 'screens'"):
+            parse_dashboard({"root": {"type": "spacer"}, "screens": [{"root": {"type": "spacer"}}]})
+
+    def test_neither_is_rejected(self) -> None:
+        with pytest.raises(DashboardConfigError, match="needs a 'root' node, or a 'screens' list"):
+            parse_dashboard({"theme": "midnight"})
+
+    def test_an_empty_screens_list_is_rejected(self) -> None:
+        with pytest.raises(DashboardConfigError, match="needs at least one screen"):
+            parse_dashboard({"screens": []})
+
+    def test_screens_must_be_a_list(self) -> None:
+        with pytest.raises(DashboardConfigError, match="screens: expected a list"):
+            parse_dashboard({"screens": {"root": {"type": "spacer"}}})
+
+    def test_a_screen_needs_a_root(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"screens\[0\]: a screen needs a 'root'"):
+            parse_dashboard({"screens": [{"name": "nope"}]})
+
+    def test_errors_inside_a_screen_carry_its_index(self) -> None:
+        document = {
+            "screens": [
+                {"root": {"type": "spacer"}},
+                {"root": {"type": "gauge", "entity": "sensor.a", "warning_at": 3}},
+            ]
+        }
+        with pytest.raises(
+            DashboardConfigError, match=r"screens\[1\]\.root\.warning_at: must be at most 1"
+        ):
+            parse_dashboard(document)
+
+    def test_unknown_screen_keys_are_rejected(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"screens\[0\]\.titel: unknown key"):
+            parse_dashboard({"screens": [{"root": {"type": "spacer"}, "titel": "typo"}]})
+
+    def test_rotate_every_has_a_floor(self) -> None:
+        # Faster than the panel can repaint is a mistake, not a preference.
+        with pytest.raises(DashboardConfigError, match=r"rotate_every: must be at least 0\.5"):
+            parse_dashboard(
+                {
+                    "rotate_every": 0.1,
+                    "screens": [{"root": {"type": "spacer"}}, {"root": {"type": "spacer"}}],
+                }
+            )

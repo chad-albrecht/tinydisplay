@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tinydisplay-homeassistant"
-version = "0.2.0"
+version = "0.3.0"
 description = "Home Assistant dashboards for TinyDisplay: YAML definitions, entity binding and a change-driven render loop."
 readme = "README.md"
 requires-python = ">=3.12"

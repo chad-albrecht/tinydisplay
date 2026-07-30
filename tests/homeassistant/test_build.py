@@ -506,3 +506,139 @@ class TestHotReload:
         path.unlink()
         assert dashboard.reload_if_changed() is False
         assert find(dashboard.root, Label).text == "one"
+
+
+SCREENS_DOC = {
+    "rotate_every": 5,
+    "screens": [
+        {"name": "one", "root": {"type": "label", "text": "{{ sensor.a }}"}},
+        {"name": "two", "root": {"type": "label", "text": "{{ sensor.b }}"}},
+    ],
+}
+
+
+class TestScreens:
+    """Cycling through several screens.
+
+    Each screen gets its own widget tree rather than one tree reconfigured on
+    rotation, so cached layout and sparkline history survive being off-screen.
+    """
+
+    def test_every_screen_is_built(self) -> None:
+        dashboard = Dashboard.from_document(SCREENS_DOC)
+        assert dashboard.screen_count == 2
+        assert dashboard.current_screen == 0
+        assert dashboard.screen_name == "one"
+
+    def test_the_screens_are_separate_trees(self) -> None:
+        dashboard = Dashboard.from_document(SCREENS_DOC)
+        first = dashboard.root
+        dashboard.advance()
+        assert dashboard.root is not first
+
+    def test_advance_wraps(self) -> None:
+        dashboard = Dashboard.from_document(SCREENS_DOC)
+        assert dashboard.advance() == 1
+        assert dashboard.advance() == 0
+        assert dashboard.screen_name == "one"
+
+    def test_show_screen_jumps(self) -> None:
+        dashboard = Dashboard.from_document(SCREENS_DOC)
+        dashboard.show_screen(1)
+        assert dashboard.screen_name == "two"
+
+    def test_show_screen_rejects_an_index_that_does_not_exist(self) -> None:
+        dashboard = Dashboard.from_document(SCREENS_DOC)
+        with pytest.raises(IndexError, match="no screen 5"):
+            dashboard.show_screen(5)
+
+    def test_hidden_screens_are_still_updated(self) -> None:
+        # A sparkline on the screen that is not showing would otherwise come
+        # back with a history that lies about what happened while it was away.
+        dashboard = Dashboard.from_document(
+            {
+                "screens": [
+                    {"root": {"type": "spacer"}},
+                    {"root": {"type": "sparkline", "entity": "sensor.a"}},
+                ]
+            }
+        )
+        for reading in ("1", "2", "3"):
+            dashboard.update(StaticStateSource({"sensor.a": reading}))
+
+        dashboard.advance()
+        assert list(find(dashboard.root, Sparkline).values) == [1.0, 2.0, 3.0]
+
+    def test_only_the_current_screen_draws(self) -> None:
+        dashboard = Dashboard.from_document(
+            {
+                "background": "#000000",
+                "screens": [
+                    {
+                        "root": {
+                            "type": "progress",
+                            "value": "100",
+                            "max": 100,
+                            "color": "#ff0000",
+                            "radius": 0,
+                        }
+                    },
+                    {"root": {"type": "spacer"}},
+                ],
+            }
+        )
+        source = StaticStateSource()
+
+        first = Canvas(40, 10)
+        dashboard.render(first, source)
+        assert first.get_pixel(20, 5) == Color.from_hex("#ff0000")
+
+        dashboard.advance()
+        second = Canvas(40, 10)
+        dashboard.render(second, source)
+        assert second.get_pixel(20, 5) == Color.from_hex("#000000")
+
+    def test_a_single_screen_dashboard_reports_one(self) -> None:
+        dashboard = build({"type": "spacer"})
+        assert dashboard.screen_count == 1
+        assert dashboard.rotate_every is None
+        assert dashboard.advance() == 0
+
+    def test_rotation_is_exposed(self) -> None:
+        assert Dashboard.from_document(SCREENS_DOC).rotate_every == 5.0
+
+    def test_a_rotating_dashboard_is_not_static(self) -> None:
+        # Every screen may be fixed text and the panel still changes, which is
+        # what a caller deciding whether to run a loop is asking about.
+        dashboard = Dashboard.from_document(
+            {
+                "rotate_every": 5,
+                "screens": [
+                    {"root": {"type": "label", "text": "one"}},
+                    {"root": {"type": "label", "text": "two"}},
+                ],
+            }
+        )
+        assert not dashboard.is_static
+
+    def test_repr_mentions_the_screen_count(self) -> None:
+        assert "2 screens" in repr(Dashboard.from_document(SCREENS_DOC))
+
+    def test_a_reload_that_drops_screens_keeps_the_index_in_range(self, tmp_path: Path) -> None:
+        path = tmp_path / "d.yaml"
+        two = "screens:\n  - root: {type: label, text: one}\n  - root: {type: label, text: two}\n"
+        path.write_text(two, encoding="utf-8")
+        stamp = _BASE_NS + next(_TICKS) * 1_000_000_000
+        os.utime(path, ns=(stamp, stamp))
+
+        dashboard = Dashboard.load(path)
+        dashboard.advance()
+        assert dashboard.current_screen == 1
+
+        path.write_text("root:\n  type: label\n  text: only\n", encoding="utf-8")
+        stamp = _BASE_NS + next(_TICKS) * 1_000_000_000
+        os.utime(path, ns=(stamp, stamp))
+
+        assert dashboard.reload_if_changed() is True
+        assert dashboard.current_screen == 0
+        assert find(dashboard.root, Label).text == "only"
