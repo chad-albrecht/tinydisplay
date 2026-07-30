@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 import voluptuous as vol
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult, OptionsFlow
+from homeassistant.core import callback
 
 from tinydisplay.homeassistant import Dashboard, DashboardConfigError, missing_entities
 
@@ -111,8 +112,14 @@ class TinyDisplayConfigFlow(ConfigFlow, domain=DOMAIN):  # type: ignore[call-arg
             )
 
     @staticmethod
+    @callback
     def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
-        """Return the options flow for an existing entry."""
+        """Return the options flow for an existing entry.
+
+        The entry is not passed on: since Home Assistant 2024.11 the framework
+        sets ``config_entry`` on the flow itself, and assigning it here is
+        deprecated.
+        """
         del config_entry
         return TinyDisplayOptionsFlow()
 

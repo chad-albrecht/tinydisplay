@@ -197,6 +197,44 @@ class TestTranslations:
         assert "{error}" in errors["invalid_dashboard"]
 
 
+class TestBrandImages:
+    """Home Assistant 2026.3 and later prefer an icon shipped with the component.
+
+    Before that, a custom integration could only get one by opening a pull
+    request against home-assistant/brands. Bundling is both simpler and
+    version-locked to the integration, so these check the files are where the
+    UI looks for them and shaped the way it expects.
+    """
+
+    @pytest.mark.parametrize(
+        ("name", "size"),
+        [
+            ("icon.png", 256),
+            ("icon@2x.png", 512),
+            ("dark_icon.png", 256),
+            ("dark_icon@2x.png", 512),
+        ],
+    )
+    def test_brand_image_exists_at_the_right_size(self, name: str, size: int) -> None:
+        from PIL import Image  # noqa: PLC0415 - only this test needs Pillow
+
+        path = COMPONENT / "brand" / name
+        assert path.is_file()
+        with Image.open(path) as image:
+            assert image.size == (size, size)
+            # Square, and transparent at the corners so the rounded shape reads
+            # against whatever surface Home Assistant puts behind it.
+            assert image.mode == "RGBA"
+            corner = image.getpixel((0, 0))
+            assert isinstance(corner, tuple)
+            assert corner[3] == 0
+
+    def test_the_generator_is_kept(self) -> None:
+        # The icons are drawn with the project's own canvas rather than exported
+        # from a design tool, so the source of truth is a script, not a binary.
+        assert (REPO_ROOT / "tools" / "make_brand_icon.py").is_file()
+
+
 class TestHacsMetadata:
     def test_hacs_manifest_exists(self) -> None:
         assert (REPO_ROOT / "hacs.json").is_file()
