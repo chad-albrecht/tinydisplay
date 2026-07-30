@@ -73,15 +73,25 @@ async with LedController() as leds:
     await leds.set_theme(LedTheme.BREATHING, intensity=4, speed=2)
 ```
 
-**The strip cannot be set to a colour**, and that is the hardware rather than a
-missing feature. The CH340 is only a UART bridge; the LEDs are driven by a
-custom microcontroller on the S1's motherboard, whose firmware exposes five
-effects and no colour channel. Confirmed three ways: theme bytes `0x06`-`0x0C`
-produce no response on real hardware, the upstream implementation offers the
-same five and states that no RGB values are supported, and the board's design
-puts the colours inside a chip nothing here talks to. `LedTheme.COLORS` cycles
-solid colours, so a given colour exists as a phase of an animation rather than
-a state you can select.
+**The protocol carries no colour.** One byte selects an effect; there is no
+colour field. That is the hardware rather than a missing feature — the CH340 is
+only a UART bridge, and the LEDs are driven by a custom microcontroller on the
+S1's motherboard whose firmware owns the colours. Theme bytes `0x06`-`0x0C`
+produce no response on real hardware, and three independent implementations
+agree on the same five-byte packet and the same five effects.
+
+**A solid colour is still reachable, by a trick.** Each animated effect starts
+from a fixed colour, so resending the command faster than the animation
+advances pins it at that first frame — red from `COLORS`, blue-purple from
+`RAINBOW`. [`fsncps/acemagic-ledctl`][ledctl] does this at about 40 Hz.
+
+Two limits: only the *starting* colour of an effect can be held, since a reset
+returns to frame zero — so green, which lives partway through a cycle, is not
+available. And 40 Hz is the serial link flat out (five bytes at 5 ms pacing is
+roughly 20 ms a packet), so holding a colour means saturating the line for as
+long as you want it held.
+
+[ledctl]: https://github.com/fsncps/acemagic-ledctl
 
 ## Layout
 

@@ -22,19 +22,26 @@ that the firmware counts backwards.
 10,000 baud is not a standard rate, and the bridge is slow enough that bytes
 must be paced: upstream waits 5 ms between them, and so does this.
 
-**There is no way to set a colour.** The packet has one byte for the effect and
-none for colour, and that is a property of the hardware rather than a gap in
-this reconstruction. The CH340 is only a UART bridge; behind it sits a custom
-microcontroller on the S1's motherboard that owns the LEDs, and its firmware
-exposes five effects and nothing else. Three lines of evidence agree: sweeping
-theme bytes 0x06 through 0x0C against a real strip produced no response at all,
-the upstream Rust implementation offers the same five and states outright that
-no RGB or custom colour values are supported, and the board's own design puts
-the colours inside a chip we do not talk to.
+**The protocol carries no colour.** One byte selects an effect and there is no
+colour field, which is a property of the hardware rather than a gap in this
+reconstruction: the CH340 is only a UART bridge, and behind it sits a custom
+microcontroller on the S1's motherboard whose firmware owns the colours. Three
+independent implementations agree on the same five-byte packet and the same
+five effects, and sweeping theme bytes 0x06 through 0x0C against a real strip
+produced no response at all.
 
-The closest thing to a single colour is :attr:`LedTheme.COLORS`, which cycles
-through solid colours -- so any given colour exists as a phase of an animation
-rather than as a state that can be selected.
+**A solid colour is still reachable, by a trick.** Each animated effect starts
+from a fixed colour, so sending the same command faster than the animation can
+advance pins it at that first frame. ``fsncps/acemagic-ledctl`` uses this to
+hold red (restarting :attr:`LedTheme.COLORS`, which begins red) and blue-purple
+(restarting :attr:`LedTheme.RAINBOW`, which begins there).
+
+Two limits are worth knowing before reaching for it. Only the *starting* colour
+of each effect can be held -- a reset always returns to frame zero, so a colour
+partway through a cycle cannot be sat on, and green is not available at all.
+And the rate is not tunable: at five bytes and 5 ms of pacing between them a
+packet takes about 20 ms, so "roughly 40 Hz" is the link running flat out, and
+holding a colour means saturating the serial line for as long as you want it.
 
 Example:
     >>> from tinydisplay.ht32.led import LedTheme, build_led_packet
