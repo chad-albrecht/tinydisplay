@@ -64,14 +64,10 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DEFAULT_BAUD_RATE",
-    "DEFAULT_HOLD_HZ",
-    "HELD_COLOURS",
     "INTER_BYTE_DELAY",
-    "LED_PACKET_SIZE",
     "LED_SIGNATURE",
     "LEVEL_MAX",
     "LEVEL_MIN",
-    "MAX_HOLD_HZ",
     "LedController",
     "LedTheme",
     "LedTransport",
@@ -91,18 +87,6 @@ DEFAULT_BAUD_RATE: Final = 10_000
 
 #: Seconds between bytes. The bridge drops bytes written back to back.
 INTER_BYTE_DELAY: Final = 0.005
-
-#: Signature, theme, intensity, speed, checksum.
-LED_PACKET_SIZE: Final = 5
-
-#: The fastest whole packets can be sent. The bridge is paced between bytes but
-#: not after the last one, so a packet costs four delays -- 20 ms, or fifty a
-#: second. Derived rather than measured, because it is arithmetic.
-MAX_HOLD_HZ: Final = 1.0 / ((LED_PACKET_SIZE - 1) * INTER_BYTE_DELAY)
-
-#: Restart rate used by :meth:`LedController.hold_theme`. A little under the
-#: ceiling, so a slow moment does not turn into a visible flicker.
-DEFAULT_HOLD_HZ: Final = 40.0
 
 LEVEL_MIN: Final = 1
 LEVEL_MAX: Final = 5
@@ -129,16 +113,6 @@ class LedTheme(IntEnum):
     COLORS = 0x03
     OFF = 0x04
     AUTO = 0x05
-
-
-#: What each effect shows when held at its first frame by
-#: :meth:`LedController.hold_theme`. Only these two are worth holding: a
-#: restart returns the animation to frame zero, so a colour partway through a
-#: cycle cannot be sat on. Green is partway through both, and so unreachable.
-HELD_COLOURS: Final[dict[LedTheme, str]] = {
-    LedTheme.COLORS: "red",
-    LedTheme.RAINBOW: "blue-purple",
-}
 
 
 def _validate_level(name: str, level: int) -> int:
@@ -476,80 +450,6 @@ class LedController:
     async def off(self) -> None:
         """Turn the LEDs off."""
         await self.set_theme(LedTheme.OFF, intensity=LEVEL_MIN, speed=LEVEL_MIN)
-
-    async def hold_theme(
-        self,
-        theme: LedTheme,
-        *,
-        intensity: int = 3,
-        speed: int = LEVEL_MIN,
-        hz: float = DEFAULT_HOLD_HZ,
-        max_writes: int | None = None,
-    ) -> int:
-        """Hold an effect at its first frame, which is how a solid colour is made.
-
-        The hardware has no colour command -- see the module docstring -- but
-        every animated effect starts from a fixed colour, so restarting it
-        faster than it can advance pins it there. :data:`HELD_COLOURS` lists
-        what that gets you: red from :attr:`LedTheme.COLORS`, blue-purple from
-        :attr:`LedTheme.RAINBOW`, and nothing else. The technique is taken from
-        ``fsncps/acemagic-ledctl``, which found it first.
-
-        This is a *loop*, not a command, and that is why it is spelled
-        differently from :meth:`set_theme`. It returns only when ``max_writes``
-        is reached or the caller cancels it, and it holds the serial link at
-        capacity for the whole time -- ``hz`` restarts a second, each one a
-        five-byte packet costing 20 ms to clock out. The colour lasts exactly
-        as long as the loop does; the strip resumes animating the moment it
-        stops.
-
-        Args:
-            theme: The effect to restart. Only the entries in
-                :data:`HELD_COLOURS` produce a steady colour.
-            intensity: Brightness from 1 to 5.
-            speed: Effect speed. Left at the slowest, because the point is to
-                stop the animation rather than run it.
-            hz: Restarts per second, capped at :data:`MAX_HOLD_HZ`.
-            max_writes: Stop after this many packets. ``None`` runs until
-                cancelled, which is what a caller wants; a number is what a
-                test wants.
-
-        Returns:
-            How many packets were written.
-
-        Raises:
-            LedError: If ``hz`` is not positive or exceeds the link's capacity,
-                if a level is out of range, or if a write fails.
-        """
-        if hz <= 0:
-            msg = f"hz must be positive, got {hz}"
-            raise LedError(msg)
-        if hz > MAX_HOLD_HZ:
-            msg = (
-                f"hz must not exceed {MAX_HOLD_HZ:g}, the fastest this bridge accepts "
-                f"whole packets, got {hz}"
-            )
-            raise LedError(msg)
-
-        packet = build_led_packet(theme, intensity=intensity, speed=speed)
-        interval = 1.0 / hz
-        loop = asyncio.get_running_loop()
-        deadline = loop.time()
-        writes = 0
-
-        while max_writes is None or writes < max_writes:
-            await self._send(packet)
-            self._theme = theme
-            writes += 1
-            if max_writes is not None and writes >= max_writes:
-                break
-            # Against a fixed deadline rather than sleeping a fixed interval:
-            # each packet already costs 20 ms to clock out, and adding the
-            # interval on top of that would drift the rate well below `hz`.
-            deadline += interval
-            await asyncio.sleep(max(0.0, deadline - loop.time()))
-
-        return writes
 
     async def _send(self, packet: bytes) -> None:
         """Write one packet off the event loop."""

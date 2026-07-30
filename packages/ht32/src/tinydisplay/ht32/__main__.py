@@ -38,13 +38,7 @@ from tinydisplay.ht32.hidraw import (
     is_hidraw_available,
     select_display_node,
 )
-from tinydisplay.ht32.led import (
-    DEFAULT_HOLD_HZ,
-    HELD_COLOURS,
-    LedController,
-    LedTheme,
-    RecordingLedTransport,
-)
+from tinydisplay.ht32.led import LedController, LedTheme, RecordingLedTransport
 from tinydisplay.ht32.patterns import PATTERNS, draw_pattern
 from tinydisplay.ht32.protocol import CHUNK_COUNT, PACKET_SIZE, PRODUCT_ID, VENDOR_ID
 from tinydisplay.ht32.transport import HidTransport, RecordingHidTransport
@@ -144,18 +138,6 @@ def build_parser() -> argparse.ArgumentParser:
     led.add_argument("--intensity", type=int, default=3, help="Brightness, 1-5 (default: 3).")
     led.add_argument("--speed", type=int, default=3, help="Effect speed, 1-5 (default: 3).")
     led.add_argument("--port", default=None, help="Serial port; defaults to discovery.")
-    led.add_argument(
-        "--hold",
-        type=float,
-        default=0.0,
-        metavar="SECONDS",
-        help=(
-            "Hold the effect at its first frame for this long, which is how a "
-            "solid colour is made: 'colors' holds red and 'rainbow' holds "
-            "blue-purple. Saturates the serial link while it runs, and the "
-            "strip animates again the moment it stops."
-        ),
-    )
     led.add_argument(
         "--dry-run",
         action="store_true",
@@ -368,30 +350,14 @@ async def run_led(
     speed: int,
     port: str | None,
     dry_run: bool,
-    hold: float = 0.0,
 ) -> int:
     """Set the LED effect. Returns a process exit status."""
     recorder = RecordingLedTransport() if dry_run else None
     controller = LedController(transport=recorder, port=port)
-    chosen = LedTheme[theme.upper()]
 
     try:
         async with controller as leds:
-            if hold > 0:
-                writes = await leds.hold_theme(
-                    chosen,
-                    intensity=intensity,
-                    speed=speed,
-                    max_writes=max(1, round(hold * DEFAULT_HOLD_HZ)),
-                )
-                _report(f"held {theme} for {hold:g}s ({writes} restarts)")
-                held = HELD_COLOURS.get(chosen)
-                if held is None:
-                    _report(f"  note: {theme} has no steady first frame; expect animation")
-                else:
-                    _report(f"  the strip should have shown a steady {held}")
-                return 0
-            await leds.set_theme(chosen, intensity=intensity, speed=speed)
+            await leds.set_theme(LedTheme[theme.upper()], intensity=intensity, speed=speed)
     except HT32Error as exc:
         _report(f"error: {exc}")
         return 1
@@ -429,7 +395,6 @@ def main(argv: Sequence[str] | None = None) -> int:
                 speed=args.speed,
                 port=args.port,
                 dry_run=args.dry_run,
-                hold=args.hold,
             )
         )
     except HT32Error as exc:
