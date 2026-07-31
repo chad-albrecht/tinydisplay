@@ -7,6 +7,8 @@ strict** -- a mistake in the document raises when it is loaded -- and
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 
 from tinydisplay.homeassistant import (
@@ -17,6 +19,7 @@ from tinydisplay.homeassistant import (
     TemplateError,
     template_entity_ids,
 )
+from tinydisplay.homeassistant import template as template_module
 
 
 @pytest.fixture
@@ -267,4 +270,72 @@ class TestParseErrors:
 
     def test_replace_leaves_a_missing_value_missing(self) -> None:
         rendered = Template.parse("{{ sensor.gone | replace(a, b) }}").render(StaticStateSource())
+        assert rendered == UNAVAILABLE_TEXT
+
+
+class TestTimeFilters:
+    """``age`` and ``duration``, which exist so an uptime can be read at a glance.
+
+    Home Assistant states every ``device_class: timestamp`` as an ISO 8601
+    instant, and a panel showing ``2026-07-28T03:14:00+00:00`` is showing its
+    working rather than an answer.
+    """
+
+    #: A fixed "now", so that `age` is testable at all. The filter reads the
+    #: clock through `_now`, which exists to be replaced exactly here.
+    NOW = datetime(2026, 7, 30, 7, 14, 0, tzinfo=UTC)
+
+    @pytest.fixture(autouse=True)
+    def _frozen_clock(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(template_module, "_now", lambda: self.NOW)
+
+    @pytest.mark.parametrize(
+        ("seconds", "expected"),
+        [
+            (0, "0s"),
+            (45, "45s"),
+            (60, "1m"),
+            (1080, "18m"),
+            (3600, "1h"),
+            (15120, "4h 12m"),
+            (86400, "1d"),
+            (187200, "2d 4h"),
+            (259200, "3d"),
+        ],
+    )
+    def test_duration_reads_as_at_most_two_units(self, seconds: int, expected: str) -> None:
+        states = StaticStateSource({"sensor.up": str(seconds)})
+        assert Template.parse("{{ sensor.up | duration }}").render(states) == expected
+
+    def test_age_counts_back_from_now(self) -> None:
+        states = StaticStateSource({"sensor.last_boot": "2026-07-28T03:14:00+00:00"})
+        assert Template.parse("{{ sensor.last_boot | age }}").render(states) == "2d 4h"
+
+    def test_age_reads_a_zoneless_timestamp_as_utc(self) -> None:
+        # Home Assistant emits a zone, but a hand-written dashboard or a
+        # template sensor may not, and guessing local time would be wrong by
+        # however many hours the machine happens to be from UTC.
+        states = StaticStateSource({"sensor.last_boot": "2026-07-30T03:14:00"})
+        assert Template.parse("{{ sensor.last_boot | age }}").render(states) == "4h"
+
+    def test_a_timestamp_in_the_future_does_not_go_negative(self) -> None:
+        # Clock skew between an appliance and whatever set the timestamp is
+        # ordinary, and "-1s" of uptime reads as a fault that is not there.
+        states = StaticStateSource({"sensor.last_boot": "2026-07-30T09:00:00+00:00"})
+        assert Template.parse("{{ sensor.last_boot | age }}").render(states) == "0s"
+
+    @pytest.mark.parametrize("value", ["not a date", "", "21.5", "2026-13-45T99:99:99"])
+    def test_a_value_that_is_not_a_timestamp_is_unavailable(self, value: str) -> None:
+        states = StaticStateSource({"sensor.a": value})
+        assert Template.parse("{{ sensor.a | age }}").render(states) == UNAVAILABLE_TEXT
+
+    def test_age_falls_through_to_default(self) -> None:
+        # The point of returning None rather than raising: `default` still
+        # catches it, exactly as it does for every other filter.
+        states = StaticStateSource({"sensor.a": "not a date"})
+        rendered = Template.parse("{{ sensor.a | age | default(never) }}").render(states)
+        assert rendered == "never"
+
+    def test_duration_leaves_a_missing_value_missing(self) -> None:
+        rendered = Template.parse("{{ sensor.gone | duration }}").render(StaticStateSource())
         assert rendered == UNAVAILABLE_TEXT

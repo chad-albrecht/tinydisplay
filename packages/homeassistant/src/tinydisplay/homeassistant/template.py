@@ -21,6 +21,13 @@ arithmetic and no way to call anything, which is a feature rather than a
 limitation to be lifted later: a dashboard definition is a document, and the
 render loop evaluates it several times a second on an appliance.
 
+One filter reads the clock: ``age`` turns a timestamp into how long ago it
+was, which is the only way to render an uptime without date arithmetic in the
+grammar. It is the sole impurity here, it goes through :func:`_now` so that it
+can be tested, and it is worth knowing that a template using it only changes
+when something repaints -- so an uptime is as fresh as ``max_interval``, not as
+fresh as the clock.
+
 Templates are parsed once, when the dashboard is loaded, and rendered many
 times. Parsing is strict -- an unknown filter or an unclosed brace raises -- and
 rendering is not: an entity that is missing or unavailable becomes
@@ -41,6 +48,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final
 
 from tinydisplay.homeassistant.errors import TemplateError
@@ -62,6 +70,12 @@ UNAVAILABLE_TEXT: Final = "--"
 _PLACEHOLDER: Final = re.compile(r"\{\{(.*?)\}\}", re.DOTALL)
 _FILTER_CALL: Final = re.compile(r"^([a-z_][a-z0-9_]*)\s*(?:\((.*)\))?$", re.IGNORECASE)
 _NUMBER: Final = re.compile(r"^[+-]?(?:\d+\.?\d*|\.\d+)$")
+
+#: Seconds in a minute, minutes in an hour, hours in a day -- named so that
+#: `_format_duration` reads as the unit ladder it is.
+_PER_MINUTE: Final = 60
+_PER_HOUR: Final = 60
+_PER_DAY: Final = 24
 
 
 def _as_number(value: Any) -> float | None:
@@ -134,6 +148,82 @@ def _filter_replace(value: Any, args: Sequence[Any]) -> Any:
     return None if value is None else str(value).replace(str(args[0]), str(args[1]))
 
 
+def _now() -> datetime:
+    """The current moment, in UTC.
+
+    A seam rather than an inline call, so that :func:`_filter_age` can be
+    tested against a known instant. It is the only impurity in this module and
+    it is deliberately one function wide.
+    """
+    return datetime.now(UTC)
+
+
+def _format_duration(seconds: float) -> str:
+    """A span of seconds as at most two units: ``2d 4h``, ``18m``, ``45s``.
+
+    Two units because the panel is 320 pixels wide and because nobody reading
+    an uptime cares about the seconds once it is measured in days. Trailing
+    zero units are dropped, so it reads ``3d`` rather than ``3d 0h``.
+
+    Example:
+        >>> _format_duration(45)
+        '45s'
+        >>> _format_duration(1080)
+        '18m'
+        >>> _format_duration(15120)
+        '4h 12m'
+        >>> _format_duration(187200)
+        '2d 4h'
+        >>> _format_duration(259200)
+        '3d'
+    """
+    total = max(0, int(seconds))
+    if total < _PER_MINUTE:
+        return f"{total}s"
+    minutes, _ = divmod(total, _PER_MINUTE)
+    if minutes < _PER_HOUR:
+        return f"{minutes}m"
+    hours, minutes = divmod(minutes, _PER_HOUR)
+    if hours < _PER_DAY:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+    days, hours = divmod(hours, _PER_DAY)
+    return f"{days}d {hours}h" if hours else f"{days}d"
+
+
+def _filter_duration(value: Any, args: Sequence[Any]) -> Any:  # noqa: ARG001
+    """A number of seconds as a readable span.
+
+    Example:
+        >>> _filter_duration("15120", ())
+        '4h 12m'
+    """
+    number = _as_number(value)
+    return None if number is None else _format_duration(number)
+
+
+def _filter_age(value: Any, args: Sequence[Any]) -> Any:  # noqa: ARG001
+    """How long ago a timestamp was, as a readable span.
+
+    Home Assistant states a great many things as an ISO 8601 instant --
+    ``sensor.last_boot``, ``sensor.uptime``, every ``device_class: timestamp``
+    -- and a panel showing ``2026-07-28T03:14:00+00:00`` is showing its
+    working rather than an answer.
+
+    A value that is not a timestamp becomes ``None``, so ``| default('--')``
+    behaves as it does everywhere else. A timestamp with no zone is read as
+    UTC, which is what Home Assistant emits.
+    """
+    if not isinstance(value, str):
+        return None
+    try:
+        moment = datetime.fromisoformat(value.strip())
+    except ValueError:
+        return None
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=UTC)
+    return _format_duration((_now() - moment).total_seconds())
+
+
 def _text_filter(function: Callable[[str], str]) -> Callable[[Any, Sequence[Any]], Any]:
     """Adapt a string method into a filter that skips missing values."""
 
@@ -167,6 +257,8 @@ FILTERS: Final[dict[str, _FilterSpec]] = {
     "capitalize": _FilterSpec(_text_filter(str.capitalize)),
     "strip": _FilterSpec(_text_filter(str.strip)),
     "replace": _FilterSpec(_filter_replace, min_args=2, max_args=2),
+    "age": _FilterSpec(_filter_age),
+    "duration": _FilterSpec(_filter_duration),
     "default": _FilterSpec(_filter_default, min_args=1, max_args=1, handles_missing=True),
 }
 

@@ -202,7 +202,24 @@ test suite and the simulator.
 ```
 
 Filters: `round(n)`, `int`, `float`, `abs`, `upper`, `lower`, `title`,
-`capitalize`, `strip`, `default(value)`.
+`capitalize`, `strip`, `replace(from, to)`, `age`, `duration`,
+`default(value)`.
+
+`age` turns a timestamp into how long ago it was, and `duration` does the same
+for a count of seconds — both as at most two units, `2d 4h` or `18m` or `45s`:
+
+```text
+{{ sensor.last_boot | age }}          2d 4h
+{{ sensor.uptime_seconds | duration }}   4h 12m
+```
+
+They exist because Home Assistant states every `device_class: timestamp` as an
+ISO 8601 instant, and a panel showing `2026-07-28T03:14:00+00:00` is showing
+its working rather than an answer. `age` is the only filter that reads the
+clock, so it is also the only one whose output changes without any entity
+changing — which means an uptime is as fresh as `max_interval`, not as fresh
+as the clock. A timestamp with no zone is read as UTC, and one in the future
+(clock skew, which is ordinary) reads as `0s` rather than going negative.
 
 There is no control flow, no arithmetic and no way to call anything. That is a
 feature rather than a limitation waiting to be lifted: a dashboard definition

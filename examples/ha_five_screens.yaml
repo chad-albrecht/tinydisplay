@@ -1,0 +1,388 @@
+# Five screens on rotation: outdoors, indoors, the front door, the machine, and
+# the internet connection. Laid out for the HT32's 320x170.
+#
+# Preview it with no Home Assistant and no hardware, after pointing that
+# example's DASHBOARD_PATH at this file:
+#
+#     uv run python -m tinydisplay.simulator examples/ha_simulator_dashboard.py
+#
+# **The entity ids here are placeholders.** Each is named in a comment above
+# the screen that uses it, so substituting yours is a search for the id rather
+# than a read of the whole document. Check them in Developer Tools -> States
+# first: an entity that does not exist does not raise, it draws as `--` or as
+# an empty bar, which looks exactly like a reading of zero.
+
+theme: midnight
+background: background
+unavailable: "--"
+
+rotate_every: 10
+
+screens:
+  # -- 1. Outdoors -------------------------------------------------------
+  # weather.forecast_home -- state is the condition; temperature and humidity
+  # are attributes of it, so the whole screen reads one entity.
+  - name: Outdoors
+    root:
+      type: stack
+      axis: vertical
+      spacing: 4
+      padding: 8
+      children:
+        - type: stack
+          axis: horizontal
+          size: 16
+          spacing: 6
+          children:
+            - type: label
+              weight: 1
+              text: Outdoors
+              color: muted
+              valign: middle
+              wrap: false
+
+            - type: label
+              weight: 2
+              text: "{{ weather.forecast_home | replace('_', ' ') | title }}"
+              color: text
+              align: right
+              valign: middle
+              wrap: false
+              shrink_to_fit: true
+
+        - type: label
+          weight: 1
+          text: "{{ weather.forecast_home.temperature | round(0) }}°"
+          color: accent
+          font_size: 60
+          align: center
+          valign: middle
+          wrap: false
+          shrink_to_fit: true
+
+        - type: stack
+          axis: horizontal
+          size: 30
+          spacing: 8
+          children:
+            - type: label
+              size: 96
+              text: "Humidity {{ weather.forecast_home.humidity | round(0) }}%"
+              color: muted
+              valign: middle
+              wrap: false
+              shrink_to_fit: true
+
+            - type: progress
+              weight: 1
+              cross_size: 12
+              cross_align: center
+              entity: weather.forecast_home
+              attribute: humidity
+              max: 100
+              color: accent
+              track_color: surface
+              radius: 3
+
+  # -- 2. Indoors --------------------------------------------------------
+  # sensor.h5075_living_room_temperature
+  # sensor.h5075_living_room_humidity
+  - name: Indoors
+    root:
+      type: stack
+      axis: vertical
+      spacing: 4
+      padding: 8
+      children:
+        - type: stack
+          axis: horizontal
+          size: 16
+          spacing: 6
+          children:
+            - type: label
+              weight: 1
+              text: Living Room
+              color: muted
+              valign: middle
+              wrap: false
+
+            - type: label
+              weight: 1
+              text: "{{ sensor.h5075_living_room_humidity | round(0) }}% RH"
+              color: text
+              align: right
+              valign: middle
+              wrap: false
+
+        - type: label
+          weight: 1
+          text: "{{ sensor.h5075_living_room_temperature | round(1) }}{{ sensor.h5075_living_room_temperature.unit_of_measurement }}"
+          color: accent
+          font_size: 56
+          align: center
+          valign: middle
+          wrap: false
+          shrink_to_fit: true
+
+        # Humidity since the panel started. The sparkline samples on change,
+        # so this is a record of what happened, not of when it was repainted.
+        - type: sparkline
+          size: 34
+          entity: sensor.h5075_living_room_humidity
+          color: accent
+
+  # -- 3. Front door -----------------------------------------------------
+  # lock.front_door -- state is `locked` or `unlocked`. For a contact sensor
+  # instead, use binary_sensor.front_door and map `on`/`off` rather than
+  # `locked`/`unlocked` in both colour blocks below.
+  - name: Front door
+    root:
+      type: stack
+      axis: vertical
+      spacing: 6
+      padding: 10
+      children:
+        - type: label
+          size: 16
+          text: Front Door
+          color: muted
+          align: center
+          valign: middle
+          wrap: false
+
+        - type: stack
+          axis: horizontal
+          weight: 1
+          spacing: 12
+          children:
+            - type: icon
+              size: 56
+              cross_align: center
+              cross_size: 56
+              icon: circle
+              thickness: 5
+              entity: lock.front_door
+              color:
+                locked: success
+                unlocked: danger
+                default: muted
+
+            - type: label
+              weight: 1
+              text: "{{ lock.front_door | title }}"
+              font_size: 46
+              align: center
+              valign: middle
+              wrap: false
+              shrink_to_fit: true
+              entity: lock.front_door
+              color:
+                locked: success
+                unlocked: danger
+                default: muted
+
+  # -- 4. System ---------------------------------------------------------
+  # sensor.processor_use          sensor.processor_temperature
+  # sensor.memory_use_percent     sensor.last_boot
+  - name: System
+    root:
+      type: stack
+      axis: vertical
+      spacing: 5
+      padding: 8
+      children:
+        - type: stack
+          axis: horizontal
+          size: 16
+          spacing: 6
+          children:
+            - type: label
+              weight: 1
+              text: System
+              color: muted
+              valign: middle
+              wrap: false
+
+            - type: label
+              weight: 1
+              text: "{{ sensor.processor_temperature | round(0) }}°C"
+              color: text
+              align: right
+              valign: middle
+              wrap: false
+
+        - type: grid
+          weight: 1
+          rows: 2
+          columns: 1
+          spacing: 6
+          children:
+            - type: stack
+              row: 0
+              column: 0
+              axis: vertical
+              spacing: 3
+              children:
+                - type: label
+                  size: 13
+                  text: "CPU {{ sensor.processor_use | round(0) }}%"
+                  color: muted
+                  wrap: false
+
+                - type: gauge
+                  weight: 1
+                  entity: sensor.processor_use
+                  max: 100
+                  segments: 16
+                  color: success
+                  track_color: surface
+                  warning_at: 0.8
+                  warning_color: warning
+
+            - type: stack
+              row: 1
+              column: 0
+              axis: vertical
+              spacing: 3
+              children:
+                - type: label
+                  size: 13
+                  text: "Memory {{ sensor.memory_use_percent | round(0) }}%"
+                  color: muted
+                  wrap: false
+
+                - type: progress
+                  weight: 1
+                  entity: sensor.memory_use_percent
+                  max: 100
+                  color: accent
+                  track_color: surface
+                  radius: 3
+
+        # `age` turns the timestamp into how long ago it was. It is the one
+        # filter that reads the clock, so this line changes without any entity
+        # changing -- which means it is as fresh as `max_interval`, not as
+        # fresh as the clock.
+        - type: label
+          size: 14
+          text: "Up {{ sensor.last_boot | age | default(--) }}"
+          color: muted
+          align: center
+          valign: middle
+          wrap: false
+          shrink_to_fit: true
+
+  # -- 5. Speedtest ------------------------------------------------------
+  # sensor.speedtest_download  sensor.speedtest_upload  sensor.speedtest_ping
+  - name: Speedtest
+    root:
+      type: stack
+      axis: vertical
+      spacing: 4
+      padding: 8
+      children:
+        - type: stack
+          axis: horizontal
+          size: 16
+          spacing: 6
+          children:
+            - type: label
+              weight: 1
+              text: Internet
+              color: muted
+              valign: middle
+              wrap: false
+
+            - type: label
+              weight: 1
+              text: "{{ sensor.speedtest_ping | round(0) }} ms"
+              color: text
+              align: right
+              valign: middle
+              wrap: false
+
+        - type: grid
+          weight: 1
+          rows: 1
+          columns: 2
+          spacing: 10
+          children:
+            - type: stack
+              row: 0
+              column: 0
+              axis: vertical
+              spacing: 2
+              children:
+                - type: stack
+                  axis: horizontal
+                  size: 14
+                  spacing: 4
+                  children:
+                    - type: icon
+                      size: 12
+                      cross_align: center
+                      cross_size: 12
+                      icon: arrow-down
+                      thickness: 2
+                      color: success
+
+                    - type: label
+                      weight: 1
+                      text: Down
+                      color: muted
+                      valign: middle
+                      wrap: false
+
+                - type: label
+                  weight: 1
+                  text: "{{ sensor.speedtest_download | round(0) }}"
+                  color: success
+                  font_size: 40
+                  align: center
+                  valign: middle
+                  wrap: false
+                  shrink_to_fit: true
+
+            - type: stack
+              row: 0
+              column: 1
+              axis: vertical
+              spacing: 2
+              children:
+                - type: stack
+                  axis: horizontal
+                  size: 14
+                  spacing: 4
+                  children:
+                    - type: icon
+                      size: 12
+                      cross_align: center
+                      cross_size: 12
+                      icon: arrow-up
+                      thickness: 2
+                      color: accent
+
+                    - type: label
+                      weight: 1
+                      text: Up
+                      color: muted
+                      valign: middle
+                      wrap: false
+
+                - type: label
+                  weight: 1
+                  text: "{{ sensor.speedtest_upload | round(0) }}"
+                  color: accent
+                  font_size: 40
+                  align: center
+                  valign: middle
+                  wrap: false
+                  shrink_to_fit: true
+
+        - type: label
+          size: 13
+          text: Mbit/s
+          color: muted
+          align: center
+          valign: middle
+          wrap: false
