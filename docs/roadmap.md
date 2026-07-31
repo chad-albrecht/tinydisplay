@@ -215,12 +215,25 @@ Two things bring-up corrected, both of which had looked like integration bugs:
 - **Dependencies must be installed the way Home Assistant installs its own**,
   with `PYTHONUSERBASE` and `pip install --user`. A `--target` install lands
   one directory above where it looks, and reports success from every angle
-  except the one that matters.
+  except the one that matters. This no longer applies to anyone installing the
+  integration -- Home Assistant does it -- but it is why the manifest gets to
+  be the only place the packages are named.
+
+The hand install is gone. The manifest now requires each package by URL --
+a direct reference to this repository's release tarball at the tag that shipped
+the component -- so Home Assistant installs them itself, from no index, and a
+HACS update brings the libraries the new version needs. Publishing to PyPI
+would have bought the same thing and cost an account and a release step; the
+detail that makes the URL route work is that Home Assistant never treats a URL
+requirement as already satisfied, so a changed URL is always installed.
+
+It got there the hard way: a HACS update shipped a component requiring library
+0.3.0 while the appliance had 0.2.0 and nowhere to fetch the difference from,
+and the panel stayed down until the packages were installed by hand again.
 
 Still open: uptime beyond minutes, reconnection after a replug, and the options
 flow, reload and unload paths -- all unit-tested, none exercised against
-hardware. And the packages the manifest pins are not on PyPI, so they must be
-installed by hand. See
+hardware. See
 [the integration's README](../custom_components/tinydisplay/README.md).
 
 ## Beyond

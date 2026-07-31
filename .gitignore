@@ -12,6 +12,11 @@ dist/
 # Environments
 .venv/
 venv/
+# A virtualenv created under any other name. `.venv/` and `venv/` cover the
+# usual ones; these key on what a virtualenv contains rather than what it is
+# called, because `git add -A` swallowed 1646 files of one called `pipcheck`.
+**/pyvenv.cfg
+**/site-packages/
 env/
 
 # Tooling caches

@@ -146,21 +146,22 @@ widgets, a container, and a frame pushed through a driver at HT32 resolution.
 
 ## Installing in Home Assistant
 
-**Two steps, and the order matters.** HACS copies the integration; it does
-**not** install Python requirements. Home Assistant does that itself, from
-PyPI — and these packages are not published there yet, so a HACS-first install
-fails once on the way with a confusing error.
+**Through HACS, as a custom repository, and that is the whole of it.** HACS
+copies the integration; Home Assistant installs the Python packages itself,
+from this repository's release tarball, because the manifest asks for them by
+URL rather than by name. Nothing is installed by hand, and an update through
+HACS brings the libraries that version needs — the URLs point at the tag that
+shipped it.
 
-1. **Install the Python packages** from the release tarball, using
-   `PYTHONUSERBASE=/config/deps` and `pip install --user` — the way Home
-   Assistant installs its own requirements. A `--target` install puts them one
-   directory above where it looks, and fails in a way that looks like success
-   from every angle except the one that matters.
-2. **Install the integration** through HACS as a custom repository.
+Nothing here is published to PyPI, and this is why it does not need to be. A
+[PEP 508 direct reference](https://peps.python.org/pep-0508/) installs from a
+URL with no index involved, and Home Assistant treats such a requirement as
+never-already-satisfied, so a changed URL is always fetched. That is the same
+update behaviour publishing would buy.
 
 [`custom_components/tinydisplay/README.md`](custom_components/tinydisplay/README.md)
-has the exact commands, a check that confirms step 1 took before Home Assistant
-is involved, and what to do when setup reports missing requirements anyway.
+covers setup, why the manifest lists every package in dependency order, and
+what to do when setup reports missing requirements.
 
 Before any of it, on hardware: an integration runs in Home Assistant's **Core**
 container, which cannot request the raw USB privileges an add-on can.

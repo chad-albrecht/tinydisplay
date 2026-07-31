@@ -1,17 +1,20 @@
 name: Release
 
-# Publishing to PyPI is what makes the integration installable the ordinary
-# way. Home Assistant installs a manifest requirement itself, from PyPI, and
-# compares the installed version against the pin -- so once these packages are
-# there, a HACS update that needs a newer library gets one automatically.
-# Until then every library change means a hand reinstall on the appliance, and
-# forgetting that has already taken a panel down once.
+# The integration's Python packages are installed by Home Assistant, from this
+# repository's own release tarball, rather than from an index -- see the
+# manifest's requirements. That removes the hand reinstall on the appliance
+# that every library change used to need, and it needs no account and no
+# publishing step.
+#
+# What it does need is that the URLs in the manifest actually resolve, at the
+# tag being released, in dependency order. Nothing on a developer machine can
+# check that: the tarball does not exist until the tag does. So this runs
+# afterwards and installs them exactly as Home Assistant would -- one at a
+# time, in manifest order, with no index to fall back on.
 
 on:
   release:
     types: [published]
-  # Building on demand is useful for checking the artefacts without cutting a
-  # release. This path never publishes; see the `if` on the publish job.
   workflow_dispatch:
 
 permissions:
@@ -36,40 +39,64 @@ jobs:
         run: uv build --all-packages
 
       - name: Check the metadata
-        # A wheel PyPI will reject is better found here than half way through
-        # an upload, when some packages have already gone out.
         run: uvx twine check --strict dist/*
-
-      - name: Report what was built
-        run: ls -l dist/
 
       - uses: actions/upload-artifact@v4
         with:
           name: distributions
           path: dist/
 
-  publish:
-    name: Publish to PyPI
+  requirements:
+    name: Install the way Home Assistant will
     needs: build
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
-    environment:
-      name: pypi
-      url: https://pypi.org/p/tinydisplay-core
-    permissions:
-      # Trusted publishing: PyPI verifies a short-lived OIDC token issued to
-      # this workflow, so there is no API token to store, rotate or leak.
-      id-token: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: distributions
-          path: dist/
+      - uses: actions/checkout@v7
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # The packages version independently -- a release that only changes
-          # tinydisplay-homeassistant still rebuilds tinydisplay-core at its
-          # existing version. Skipping what is already published is the normal
-          # state of affairs here, not an error worth failing a release over.
-          skip-existing: true
+      - uses: astral-sh/setup-uv@v9.0.0
+
+      - name: The manifest must point at the tag being released
+        # A manifest left pointing at the previous tag installs the previous
+        # libraries under the current component -- the exact version skew this
+        # scheme exists to make impossible. Checked here as well as in the test
+        # suite, because only here is the tag known.
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version custom_components/tinydisplay/manifest.json)
+          if [ "v$version" != "${{ github.event.release.tag_name }}" ]; then
+            echo "manifest version $version does not match tag ${{ github.event.release.tag_name }}"
+            exit 1
+          fi
+
+      - name: Install every requirement from the published tarball
+        # One at a time and in order, because that is what Home Assistant does:
+        # each install may only rely on packages an earlier line already put in
+        # place. Installing them together would resolve the whole set at once
+        # and pass while a user's machine failed.
+        run: |
+          set -euo pipefail
+          uv venv /tmp/probe
+          export VIRTUAL_ENV=/tmp/probe
+          mapfile -t requirements < <(jq -r '.requirements[]' custom_components/tinydisplay/manifest.json)
+          for requirement in "${requirements[@]}"; do
+            echo "--- $requirement"
+            uv pip install "$requirement"
+          done
+
+      - name: Import what the integration imports
+        run: |
+          /tmp/probe/bin/python - <<'PY'
+          from importlib.metadata import version
+
+          from tinydisplay.homeassistant import Dashboard, run_dashboard  # noqa: F401
+          from tinydisplay.ht32 import HT32Driver  # noqa: F401
+
+          for name in (
+              "tinydisplay-core",
+              "tinydisplay-widgets",
+              "tinydisplay-ht32",
+              "tinydisplay-homeassistant",
+          ):
+              print(f"{name} {version(name)}")
+          PY

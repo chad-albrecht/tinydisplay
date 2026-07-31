@@ -4,9 +4,9 @@ The component itself cannot be imported here -- doing that needs Home
 Assistant, which is deliberately not a dependency of this workspace. What *can*
 be checked without it is everything that fails silently at runtime: a manifest
 Home Assistant will refuse to load, translations that have drifted from the
-strings they mirror, a requirement pinned to a version that no longer exists,
-and -- most importantly -- a library package that has quietly started importing
-``homeassistant``.
+strings they mirror, requirements that point somewhere they cannot be installed
+from, and -- most importantly -- a library package that has quietly started
+importing ``homeassistant``.
 
 That last one is the rule the whole repository is arranged around, so it is
 asserted rather than assumed.
@@ -35,9 +35,49 @@ PACKAGES = REPO_ROOT / "packages"
 #: this, which is why the check is on the root module rather than a substring.
 HA_ROOT = "homeassistant"
 
+#: The one shape a manifest requirement may take: a PEP 508 direct reference to
+#: this repository's source tarball at a release tag, naming one package
+#: directory. Nothing here is published to an index, so a plain named
+#: requirement would send Home Assistant to PyPI and fail.
+REQUIREMENT = re.compile(
+    r"(?P<name>tinydisplay-[a-z0-9]+) @ "
+    r"https://github\.com/chad-albrecht/tinydisplay/archive/refs/tags/"
+    r"(?P<tag>v\d+\.\d+\.\d+)\.tar\.gz#subdirectory=packages/(?P<package>[a-z0-9]+)"
+)
+
+#: The leading name of a PEP 508 requirement, before any extras or specifier.
+DEPENDENCY_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
 
 def load_json(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def requirement_names(manifest: dict[str, Any], *, ordered: bool = False) -> Any:
+    """The distributions the manifest asks for, as a list or a set."""
+    names = []
+    for requirement in manifest["requirements"]:
+        match = REQUIREMENT.fullmatch(requirement)
+        assert match is not None, f"not a tagged URL: {requirement}"
+        names.append(match["name"])
+    return names if ordered else set(names)
+
+
+def workspace_dependencies(distribution: str) -> set[str]:
+    """Which of our own packages ``distribution`` depends on.
+
+    Read from the package's own metadata rather than listed here, so that a new
+    dependency between two packages is caught by the manifest tests without
+    anyone remembering to update them.
+    """
+    package = distribution.removeprefix("tinydisplay-")
+    pyproject = tomllib.loads((PACKAGES / package / "pyproject.toml").read_text(encoding="utf-8"))
+    found = set()
+    for dependency in pyproject["project"].get("dependencies", []):
+        match = DEPENDENCY_NAME.match(dependency)
+        if match is not None and match[0].startswith("tinydisplay-"):
+            found.add(match[0])
+    return found
 
 
 def imported_roots(source: Path) -> set[str]:
@@ -144,48 +184,114 @@ class TestManifest:
             "calculated",
         }
 
-    def test_requirements_are_pinned(self, manifest: dict[str, Any]) -> None:
+    def test_every_requirement_is_this_repository_at_a_tag(self, manifest: dict[str, Any]) -> None:
+        """Requirements are direct references, because these are not on PyPI.
+
+        A named requirement sends Home Assistant to PyPI, where none of these
+        packages exist, and setup fails with `RequirementsNotFound`. A direct
+        reference to the release tarball needs no index and no account, and
+        Home Assistant installs it exactly as it installs anything else --
+        which is the whole point, because that is the step HACS does not do.
+        """
         assert manifest["requirements"]
         for requirement in manifest["requirements"]:
-            assert "==" in requirement, f"{requirement} is not pinned"
+            assert REQUIREMENT.fullmatch(requirement), f"not a tagged URL: {requirement}"
 
-    @pytest.mark.parametrize(
-        ("distribution", "package"),
-        [
-            ("tinydisplay-homeassistant", "homeassistant"),
-            ("tinydisplay-ht32", "ht32"),
-        ],
-    )
-    def test_requirement_versions_match_the_workspace(
-        self,
-        manifest: dict[str, Any],
-        distribution: str,
-        package: str,
-    ) -> None:
-        # A pin that has drifted past the version actually in this repository
-        # would install something that does not exist, and would do it only on
-        # a user's machine.
-        pyproject = tomllib.loads(
-            (PACKAGES / package / "pyproject.toml").read_text(encoding="utf-8")
-        )
-        expected = f"{distribution}=={pyproject['project']['version']}"
-        assert expected in manifest["requirements"]
+    def test_the_tag_matches_the_component_version(self, manifest: dict[str, Any]) -> None:
+        """The libraries installed must come from the commit that shipped.
 
-    def test_the_pin_matches_the_library_that_will_be_imported(
+        This is what replaced pinning a version. HACS downloads the component
+        from tag vX; if the URLs in that manifest also say vX, the libraries
+        Home Assistant installs are the ones from the same commit as the
+        component that asks for them -- so the two cannot drift.
+
+        A tag that does not match is worse than a stale pin: every URL 404s,
+        so it fails on every user's machine and never on the machine that cut
+        the release.
+        """
+        expected = f"v{manifest['version']}"
+        for requirement in manifest["requirements"]:
+            match = REQUIREMENT.fullmatch(requirement)
+            assert match is not None
+            assert match["tag"] == expected, f"{match['name']} points at {match['tag']}"
+
+    def test_the_distribution_matches_the_directory_it_points_at(
         self, manifest: dict[str, Any]
     ) -> None:
-        """The pin, the package version and ``__version__`` must all agree.
+        # `tinydisplay-widgets @ .../subdirectory=packages/ht32` would install
+        # the wrong package under the right name, and pip would not care.
+        for requirement in manifest["requirements"]:
+            match = REQUIREMENT.fullmatch(requirement)
+            assert match is not None
+            assert match["name"] == f"tinydisplay-{match['package']}"
 
-        These are three places the same number lives, and the component runs
-        against whichever library is *installed* -- which HACS never updates,
-        because HACS only copies custom_components/. A component shipped
-        depending on a library feature, with the pin left at the older version,
-        satisfies Home Assistant's requirement check and then dies with a
-        TypeError inside the render task. That happened: `run_dashboard` gained
-        an `on_frame` argument, the pin stayed at 0.1.0, and the panel went
-        dark behind a config entry that reported itself healthy.
+    def test_every_workspace_dependency_is_listed(self, manifest: dict[str, Any]) -> None:
+        """The whole dependency closure must appear, not just what we import.
+
+        Home Assistant installs requirements one at a time, each its own pip
+        invocation. `tinydisplay-homeassistant` on its own therefore resolves
+        `tinydisplay-widgets` against PyPI, does not find it, and fails -- the
+        transitive dependency has to be named here to come from a URL too.
         """
-        assert f"tinydisplay-homeassistant=={library.__version__}" in manifest["requirements"]
+        listed = requirement_names(manifest)
+        needed = {"tinydisplay-homeassistant", "tinydisplay-ht32"}
+        closure: set[str] = set()
+        while needed:
+            distribution = needed.pop()
+            if distribution in closure:
+                continue
+            closure.add(distribution)
+            needed |= workspace_dependencies(distribution)
+        assert listed == closure
+
+    def test_requirements_are_in_dependency_order(self, manifest: dict[str, Any]) -> None:
+        """Order is load-bearing, for the same one-at-a-time reason.
+
+        Each install may only depend on packages already installed by an
+        earlier line; anything later is still absent, and pip goes looking for
+        it on PyPI.
+        """
+        order = requirement_names(manifest, ordered=True)
+        position = {name: index for index, name in enumerate(order)}
+        for index, name in enumerate(order):
+            for dependency in workspace_dependencies(name):
+                assert position[dependency] < index, f"{name} is installed before {dependency}"
+
+    def test_the_packages_satisfy_each_other(self) -> None:
+        """The bounds between our own packages must hold in this workspace.
+
+        Nothing rescues a set of URL requirements that cannot satisfy each
+        other. If `tinydisplay-widgets` were bumped to 0.2.0 while
+        `tinydisplay-homeassistant` still asked for `<0.2`, the URL install
+        would go looking for a satisfying widgets on PyPI, find nothing, and
+        fail -- on a user's machine, at setup, having worked here.
+        """
+        from packaging.requirements import Requirement  # noqa: PLC0415 - test-only
+
+        for package in ("core", "widgets", "ht32", "homeassistant"):
+            pyproject = tomllib.loads(
+                (PACKAGES / package / "pyproject.toml").read_text(encoding="utf-8")
+            )
+            for dependency in pyproject["project"].get("dependencies", []):
+                requirement = Requirement(dependency)
+                if not requirement.name.startswith("tinydisplay-"):
+                    continue
+                depended = tomllib.loads(
+                    (
+                        PACKAGES / requirement.name.removeprefix("tinydisplay-") / "pyproject.toml"
+                    ).read_text(encoding="utf-8")
+                )["project"]["version"]
+                assert requirement.specifier.contains(depended), (
+                    f"{package} wants {dependency}, workspace has {depended}"
+                )
+
+    def test_the_library_version_matches_its_package(self) -> None:
+        # No longer what the manifest asserts, but still two places the same
+        # number lives, and `__version__` is what a bug report will quote.
+        pyproject = tomllib.loads(
+            (PACKAGES / "homeassistant" / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        assert library.__version__ == pyproject["project"]["version"]
 
 
 class TestTranslations:
