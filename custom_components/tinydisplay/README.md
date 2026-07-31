@@ -40,18 +40,18 @@ them, and raw USB needs write access plus the ability to detach the kernel's
 `usbhid` driver from the interface. Confirm the rest with the preflight, which
 is standard library only and needs nothing installed:
 
-Get the file onto the machine — via the Samba share, the File editor add-on, or
-a paste into a heredoc — so that it lands at `/config/ht32_usbfs_preflight.py`.
-The Advanced SSH & Web Terminal add-on and the Core container see the same
-`/config`, so one copy serves both. Then, with Protection Mode off:
+From the Advanced SSH & Web Terminal add-on, with Protection Mode off:
 
 ```bash
+wget -O /config/ht32_usbfs_preflight.py \
+  https://raw.githubusercontent.com/chad-albrecht/tinydisplay/main/tools/ht32_usbfs_preflight.py
 docker exec homeassistant python3 /config/ht32_usbfs_preflight.py
 ```
 
-Once this repository is published, `wget` from
-`raw.githubusercontent.com/chad-albrecht/tinydisplay/main/tools/ht32_usbfs_preflight.py`
-is the shorter route. It does not work against an unpushed checkout.
+The add-on and the Core container see the same `/config`, so the file only
+needs fetching once. If the machine cannot reach `raw.githubusercontent.com`,
+get the file there by any other route — the Samba share, the File editor
+add-on, a paste into a heredoc — and run the second line as it stands.
 
 It finds the panel by vendor and product id exactly as the driver does, prints
 the interfaces and their bound drivers, and opens the node read-write before
