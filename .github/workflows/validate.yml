@@ -1,23 +1,36 @@
 name: Validate
 
-# What HACS and Home Assistant themselves check, run here rather than
-# discovered during a review of the pull request that asks to be listed in the
-# HACS default store. Both are conditions of that listing: the HACS action must
-# pass with no errors and nothing ignored, and hassfest must pass.
+# HACS's own validation, run against this repository as a *custom* repository
+# -- which is how it is installed and how it is meant to be installed. The
+# action checks the things no test can see from inside a checkout: the
+# repository description, its topics, the brand images, and hacs.json.
 #
-# Neither looks at the library packages, so neither belongs in ci.yml. These
-# check the shape of `custom_components/tinydisplay` and the repository around
-# it -- the manifest, the brand images, the description and topics -- which is
-# metadata the test suite cannot see from inside a checkout.
+# There is deliberately no hassfest job here, and this repository is not a
+# candidate for the HACS default store. The two facts are the same fact:
+#
+#   script/hassfest/requirements.py rejects any requirement containing a space,
+#   with no allowlist and no exemption. A PEP 508 direct reference needs the
+#   " @ " separator, so the manifest's URL requirements cannot pass hassfest,
+#   and hacs/default's own pull request CI runs hassfest against the submitted
+#   repository and fails the submission on it.
+#
+# The URL requirements are what removed the hand install of the libraries from
+# every appliance (see the component README). Trading that away to be listed in
+# a store would be trading the working install for a more discoverable one, so
+# the listing is what gets dropped. Publishing the four packages to PyPI would
+# satisfy both and is the way back if the store ever matters; it needs an
+# account and a publishing step, which is exactly what the URL scheme avoided.
+#
+# So: keep this passing, because it is what keeps the custom-repository install
+# working. Do not add hassfest expecting it to go green.
 
 on:
   push:
     branches: [main]
   pull_request:
-  # Repository metadata is not part of any commit: topics and the description
-  # can be changed in the GitHub UI, and a listing that passed at merge time
-  # can fail later without anything being pushed. The daily run is what
-  # notices.
+  # Topics and the description are editable in the GitHub UI and belong to no
+  # commit, so validation that passes at merge time can start failing without
+  # anything being pushed. The daily run is what notices.
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
@@ -35,15 +48,5 @@ jobs:
         uses: hacs/action@main
         with:
           category: integration
-          # No `ignore:` deliberately. The default store requires the action to
-          # pass without ignores, so silencing a check here would only move the
-          # failure to the submission.
-
-  hassfest:
-    name: Hassfest
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Hassfest validation
-        uses: home-assistant/actions/hassfest@master
+          # No `ignore:`. Every check it runs is one a user adding this as a
+          # custom repository would meet.

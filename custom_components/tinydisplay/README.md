@@ -152,6 +152,23 @@ them. That replaced pinning a version, and it is stricter: a pin can go stale
 silently, while a mismatched tag cannot exist — the release workflow installs
 the manifest's URLs from the published tag before anyone else does.
 
+**What it costs: the HACS default store.** `script/hassfest/requirements.py`
+rejects any requirement containing a space, with no allowlist and no exemption,
+and a PEP 508 direct reference needs the ` @ ` separator. So the manifest
+cannot pass hassfest — and hacs/default's own pull request CI runs hassfest
+against the repository being submitted and fails on it. This is not a gap to be
+closed later by tidying something up; the two designs are mutually exclusive.
+
+Install as a custom repository, which is what the steps above do. Everything
+else HACS validates does pass, and CI keeps it that way.
+
+Publishing the four packages to PyPI would satisfy both — named `==`-pinned
+requirements pass hassfest, and Home Assistant installs them itself — and it
+would solve the original problem too, since a version the appliance lacks would
+have somewhere to come from. It needs an account and a publishing step, which
+is what the URL scheme was chosen to avoid. That is the way back if the store
+ever matters more than it does now.
+
 ### Configure
 
 **Settings → Devices & Services → Add Integration → TinyDisplay.**
