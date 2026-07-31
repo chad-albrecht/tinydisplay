@@ -4,24 +4,44 @@
 from Home Assistant, with configurable dashboards that are not tied to any one
 device.
 
-> **Status: Phase 5, pre-alpha.** All five packages are implemented and tested.
-> The HT32 driver is **confirmed working on real hardware** — an AceMagic S1's
-> built-in panel, now driven from inside Home Assistant's own Core container
-> with the picture the right way up. Getting there found that the panel is
-> mounted upside down, that its orientation command is inert, and that the
-> bring-up pattern which had "verified" Phase 3 was structurally unable to
-> notice either.
+![An indoor temperature screen: room name, humidity, a large reading, and a sparkline of humidity over time](docs/screenshots/five-screens-2-indoors.png)
+
+|  |  |
+| --- | --- |
+| ![Outdoors: condition, a large temperature, and a humidity bar](docs/screenshots/five-screens-1-outdoors.png) | ![Front door: a ring and the word Locked, both green](docs/screenshots/five-screens-3-front-door.png) |
+| ![System: CPU segments, a memory bar, and uptime](docs/screenshots/five-screens-4-system.png) | ![Internet: download and upload speeds either side of a ping time](docs/screenshots/five-screens-5-speedtest.png) |
+
+Five screens of [`examples/ha_five_screens.yaml`](examples/ha_five_screens.yaml),
+which rotates between them on a timer.
+
+**These are renders, not photographs**, and the difference is only the glass.
+Each one comes out of the same `Dashboard.render` the appliance calls, at the
+panel's exact 320×170, then through its RGB565 colour depth — so the banding
+and the colour shift are real, and a camera would add the bezel and the
+backlight and nothing else. [`tools/make_screenshots.py`](tools/make_screenshots.py)
+regenerates them.
+
+> **Status: pre-alpha.** All five packages are implemented and tested, and the
+> integration is **confirmed on hardware** — an AceMagic S1's built-in panel,
+> driven from inside Home Assistant's own Core container, drawing live entity
+> state the right way up.
 >
-> The Home Assistant **integration** now runs: installed through HACS,
-> configured through its config flow, and drawing a dashboard onto that panel
-> from entity state, the right way up. What is not yet established is anything
-> about the long run — hours of uptime, reconnection after a replug, the
-> options flow, reload and unload. Those paths exist and are unit-tested; none
-> has been exercised against hardware.
+> **Installing takes no manual steps.** Add the repository to HACS, download,
+> restart, and configure. Home Assistant installs the Python packages itself.
+> That has been true since v0.2.1; nothing is copied onto the appliance by
+> hand.
 >
-> The one rough edge for anyone else: the packages the manifest pins are not on
-> PyPI, so they have to be installed by hand first, and in a particular way.
-> [The integration's README](custom_components/tinydisplay/README.md) covers it.
+> **One thing decides whether it works on your machine, and it is not the
+> install.** An integration runs in the Core container, which cannot request
+> the raw USB privileges an add-on can. Core *can* reach the panel on the one
+> machine this has run on; whether yours can is a five-minute check with
+> [`tools/ht32_usbfs_preflight.py`](tools/ht32_usbfs_preflight.py), and the
+> integration's README opens with it. A failure there is architectural, not a
+> setting.
+>
+> **Not established:** anything about the long run. Uptime beyond minutes,
+> reconnection after a replug, the options flow, reload and unload. Those paths
+> exist and are unit-tested; none has been exercised against hardware.
 
 ## Why
 
@@ -107,6 +127,8 @@ with no Home Assistant installed and nothing plugged in:
 uv run python -m tinydisplay.simulator examples/ha_simulator_dashboard.py
 ```
 
+![A single dashboard: room name and status dot, a large temperature, a humidity sparkline, and CPU and battery meters](docs/screenshots/ha-dashboard.png)
+
 Edit [`examples/ha_dashboard.yaml`](examples/ha_dashboard.yaml) with the window
 open and the panel follows. That the same document drives both this and a real
 Home Assistant is the point of the layering — entity state arrives through a
@@ -158,6 +180,14 @@ Nothing here is published to PyPI, and this is why it does not need to be. A
 URL with no index involved, and Home Assistant treats such a requirement as
 never-already-satisfied, so a changed URL is always fetched. That is the same
 update behaviour publishing would buy.
+
+**A custom repository is where this stays**, and that is a decision rather than
+a to-do. Home Assistant's `hassfest` rejects any requirement containing a
+space, with no exemption, and a direct reference needs the ` @ ` separator — so
+the manifest cannot pass it, and the HACS default store runs it on every
+submission. Listing there would mean giving up the install that works to gain
+one that is easier to find. Publishing to PyPI would satisfy both and is the
+way back if that ever changes.
 
 [`custom_components/tinydisplay/README.md`](custom_components/tinydisplay/README.md)
 covers setup, why the manifest lists every package in dependency order, and
