@@ -10,10 +10,10 @@
   "iot_class": "local_push",
   "issue_tracker": "https://github.com/chad-albrecht/tinydisplay/issues",
   "requirements": [
-    "tinydisplay-core @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.2.tar.gz#subdirectory=packages/core",
-    "tinydisplay-widgets @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.2.tar.gz#subdirectory=packages/widgets",
-    "tinydisplay-ht32 @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.2.tar.gz#subdirectory=packages/ht32",
-    "tinydisplay-homeassistant @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.2.tar.gz#subdirectory=packages/homeassistant"
+    "tinydisplay-core @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.3.tar.gz#subdirectory=packages/core",
+    "tinydisplay-widgets @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.3.tar.gz#subdirectory=packages/widgets",
+    "tinydisplay-ht32 @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.3.tar.gz#subdirectory=packages/ht32",
+    "tinydisplay-homeassistant @ https://github.com/chad-albrecht/tinydisplay/archive/refs/tags/v0.2.3.tar.gz#subdirectory=packages/homeassistant"
   ],
-  "version": "0.2.2"
+  "version": "0.2.3"
 }

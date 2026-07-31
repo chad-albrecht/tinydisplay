@@ -135,6 +135,13 @@ Every node also accepts `name`, `visible`, `padding`, and the layout hints its
 parent reads: `size`, `weight`, `cross_align`, `cross_size` inside a `stack`;
 `row`, `column`, `row_span`, `column_span` inside a `grid`.
 
+The `icon` node's `icon` is one of `circle` `dot` `square` `check` `cross`
+`warning` `info` `plus` `minus` `arrow-up` `arrow-down` `home` `door` `lock`
+`unlock` `lightbulb` `person` `plug` `thermometer` `droplet` `sun` `cloud`
+`wind` `fan` `flame` `bolt` `battery` `power` `wifi` `signal` `clock` `bell`.
+Naming one that does not exist is a config error listing the ones that do; the
+list is generated from the widget package, so it cannot drift out of date.
+
 The cross-axis hint is `cross_align`, not `align`, because a `label` already
 spends `align` on its text. When both were spelled the same, one key was parsed
 by two different enums and only the value they happened to share — `center` —

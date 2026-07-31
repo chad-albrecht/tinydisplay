@@ -91,11 +91,20 @@ the dashboard and would otherwise produce a silently wrong panel.
 ## Icons are drawn, not loaded
 
 The icon set is small and every symbol is a shape the canvas primitives can
-make — lines, rectangles, circles, and triangles filled by scanline. Drawn icons
-scale to their box, recolour with the theme, and need no asset pipeline.
+make — lines, rectangles, circles, and triangles and trapezoids filled by
+scanline. Drawn icons scale to their box, recolour with the theme, and need no
+asset pipeline.
 
-Anything requiring arcs is absent rather than approximated badly. For a logo or
-a weather glyph, use `ImageWidget`.
+| Group | Symbols |
+| --- | --- |
+| Shapes and marks | `circle` `dot` `square` `check` `cross` `warning` `info` `plus` `minus` `arrow-up` `arrow-down` |
+| Home and entity domains | `home` `door` `lock` `unlock` `lightbulb` `person` `plug` |
+| Sensors and weather | `thermometer` `droplet` `sun` `cloud` `wind` `fan` `flame` |
+| Status and connectivity | `bolt` `battery` `power` `wifi` `signal` `clock` `bell` |
+
+Anything requiring a genuine arc is absent rather than approximated badly: no
+crescent moon, no gapped power ring, and a square-topped padlock shackle. For a
+logo or a weather glyph, use `ImageWidget`.
 
 ## Not here
 
