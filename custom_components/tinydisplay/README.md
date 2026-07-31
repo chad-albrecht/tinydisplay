@@ -99,8 +99,18 @@ while Home Assistant fetches the tarball and builds four small pure-Python
 packages. Later starts cost nothing measurable — uv recognises the URLs it has
 already installed and does no work.
 
-If you previously installed the packages by hand into `<config>/deps`, you can
-leave them; the URL install replaces them in place.
+**If you installed the packages by hand for an earlier release, delete them**
+— they do not get replaced, they get *shadowed*, and the symptom is a dashboard
+key being rejected as unknown while the release notes say it exists:
+
+```bash
+docker exec homeassistant sh -c 'rm -rf /config/deps/lib/python*/site-packages/tinydisplay /config/deps/lib/python*/site-packages/tinydisplay_*.dist-info'
+```
+
+Home Assistant installs into the container's own `site-packages`, the hand
+install put them in `<config>/deps`, and Python reads the second one first. See
+[If a key the document clearly supports is
+rejected](#if-a-key-the-document-clearly-supports-is-rejected).
 
 ### Why the requirements are URLs
 
@@ -211,6 +221,51 @@ raw-USB transport needs nothing installed. The consequence is that the hidapi
 fallback is unavailable, so a machine where usbfs is unreachable fails with a
 clear message rather than silently taking a path that cannot drive this panel
 anyway.
+
+### If a key the document clearly supports is rejected
+
+A dashboard erroring with something like
+
+```text
+rotate_every: unknown key; this node accepts background, pixel_format, root, theme, unavailable
+```
+
+is a **stale copy of the library shadowing the one Home Assistant installed**.
+The key is not unknown; it is unknown to the version being imported.
+
+This is a leftover of installing the packages by hand, which every release
+before v0.2.1 required. Home Assistant installs its requirements into the
+container's own `site-packages`, while the hand install put them in
+`<config>/deps/lib/python3.X/site-packages` — and Python adds the user site to
+`sys.path` *ahead* of the global one. So Home Assistant installs the new
+version, satisfies its own requirement check against it, and then imports the
+old one. `tinydisplay` is a namespace package, so the two directories merge
+rather than one winning outright, which is why nothing looks obviously broken.
+
+Find every copy:
+
+```bash
+docker exec homeassistant sh -c 'find / -name "tinydisplay_homeassistant-*.dist-info" -maxdepth 9 2>/dev/null'
+```
+
+Two paths and two versions is the diagnosis. Delete the one under `deps`:
+
+```bash
+docker exec homeassistant sh -c 'rm -rf /config/deps/lib/python*/site-packages/tinydisplay /config/deps/lib/python*/site-packages/tinydisplay_*.dist-info'
+```
+
+Restart, and confirm — with **no `PYTHONUSERBASE`**, which is the variable that
+points at the stale copy and will keep reporting it:
+
+```bash
+docker exec homeassistant python3 -c "
+import tinydisplay.homeassistant as m; print(m.__version__, m.__file__)"
+```
+
+The path should be the container's `site-packages`, not `deps`. That location
+is inside the container and a Core update wipes it, which is correct and needs
+no action: Home Assistant reinstalls from the manifest's URLs on the next
+start.
 
 ## Setup
 
