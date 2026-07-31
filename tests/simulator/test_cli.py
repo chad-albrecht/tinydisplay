@@ -84,8 +84,13 @@ class TestMain:
     def test_unopenable_window_exits_one(
         self, dashboard: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """No display is a run failure, not a usage error."""
-        import tkinter as tk
+        """No display is a run failure, not a usage error.
+
+        Skipped where tkinter itself is absent, which is the uv-managed Python
+        on a Linux runner: reaching a TclError needs Tk present and a display
+        missing. macOS and Windows in the matrix cover it.
+        """
+        tk = pytest.importorskip("tkinter")
 
         def explode(*_args: object, **_kwargs: object) -> None:
             msg = "no display name and no $DISPLAY environment variable"

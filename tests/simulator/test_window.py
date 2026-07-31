@@ -192,8 +192,15 @@ class TestWindowUnavailable:
         assert issubclass(WindowUnavailableError, SimulatorError)
 
     def test_reports_a_missing_display(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Opening without a display must be a readable error, not a TclError."""
-        import tkinter as tk
+        """Opening without a display must be a readable error, not a TclError.
+
+        This needs Tk importable but *not* a display, so `requires_display` is
+        the wrong guard -- it would skip everywhere this test is worth running.
+        The uv-managed Python on a Linux runner ships no tkinter at all, where
+        the error under test cannot be reached; the macOS and Windows runners
+        have it, so the path stays covered on every push.
+        """
+        tk = pytest.importorskip("tkinter")
 
         def explode(*_args: object, **_kwargs: object) -> None:
             msg = "no display name and no $DISPLAY environment variable"

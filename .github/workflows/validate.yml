@@ -1,0 +1,49 @@
+name: Validate
+
+# What HACS and Home Assistant themselves check, run here rather than
+# discovered during a review of the pull request that asks to be listed in the
+# HACS default store. Both are conditions of that listing: the HACS action must
+# pass with no errors and nothing ignored, and hassfest must pass.
+#
+# Neither looks at the library packages, so neither belongs in ci.yml. These
+# check the shape of `custom_components/tinydisplay` and the repository around
+# it -- the manifest, the brand images, the description and topics -- which is
+# metadata the test suite cannot see from inside a checkout.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  # Repository metadata is not part of any commit: topics and the description
+  # can be changed in the GitHub UI, and a listing that passed at merge time
+  # can fail later without anything being pushed. The daily run is what
+  # notices.
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          # No `ignore:` deliberately. The default store requires the action to
+          # pass without ignores, so silencing a check here would only move the
+          # failure to the submission.
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Hassfest validation
+        uses: home-assistant/actions/hassfest@master
