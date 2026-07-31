@@ -159,7 +159,7 @@ screens:
               size: 56
               cross_align: center
               cross_size: 56
-              icon: circle
+              icon: lock
               thickness: 5
               entity: lock.front_door
               color:
