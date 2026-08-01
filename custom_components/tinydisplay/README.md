@@ -366,13 +366,23 @@ That establishes the chain end to end: the config flow and its validation,
 adapter, the entity subscriptions, the change-driven render loop, the
 keep-alive, and the 180° rotation the panel's mounting requires.
 
-**Not established.** Everything about the long run:
+**The keep-alive holds.** Over 24 hours continuous on that machine, with the
+disconnection banner never appearing — which is what the once-a-second
+heartbeat exists to prevent, and the question Phase 3 could not answer.
 
-- Uptime beyond minutes. Whether the keep-alive holds the disconnection banner
-  off for hours is still the open question it was in Phase 3.
+The evidence is that the panel was still *changing*, not merely still lit: the
+dashboard rotates screens every ten seconds and was still doing it at the end.
+That distinction is the whole check. A render loop that died leaves its last
+frame on the glass, and a still frame of plausible numbers is indistinguishable
+from a working panel — which is the same shape of mistake as the bring-up that
+"verified" Phase 3 without noticing the picture was upside down.
+
+**Not established.** The rest of the long run:
+
 - Reconnection after the panel is replugged, and the driver's retry path.
 - The options flow, entry reload and entry unload. All unit-tested, none run
   against hardware.
+- Whether any of this holds on a second machine. One appliance has run it.
 
 **Rough edges.**
 

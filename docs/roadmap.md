@@ -231,9 +231,14 @@ It got there the hard way: a HACS update shipped a component requiring library
 0.3.0 while the appliance had 0.2.0 and nowhere to fetch the difference from,
 and the panel stayed down until the packages were installed by hand again.
 
-Still open: uptime beyond minutes, reconnection after a replug, and the options
-flow, reload and unload paths -- all unit-tested, none exercised against
-hardware. See
+Uptime is settled: over 24 hours continuous, still rotating screens at the end
+and with no disconnection banner, so the keep-alive does what Phase 3 could
+only assume. Rotation is the part that matters as evidence — a dead render loop
+leaves a last frame that looks exactly like a live one.
+
+Still open: reconnection after a replug, the options flow, reload and unload --
+all unit-tested, none exercised against hardware -- and everything about a
+second machine. See
 [the integration's README](../custom_components/tinydisplay/README.md).
 
 ## Beyond

@@ -39,9 +39,13 @@ regenerates them.
 > integration's README opens with it. A failure there is architectural, not a
 > setting.
 >
-> **Not established:** anything about the long run. Uptime beyond minutes,
-> reconnection after a replug, the options flow, reload and unload. Those paths
-> exist and are unit-tested; none has been exercised against hardware.
+> **It stays up.** Over 24 hours continuous, still rotating screens at the end
+> and with no disconnection banner — so the once-a-second keep-alive does hold
+> the panel's firmware off, which was the largest open question. One machine.
+>
+> **Not established:** reconnection after a replug, the options flow, reload and
+> unload. Those paths exist and are unit-tested; none has been exercised against
+> hardware.
 
 ## Why
 
