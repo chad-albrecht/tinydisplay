@@ -15,6 +15,7 @@ asserted rather than assumed.
 from __future__ import annotations
 
 import ast
+import importlib
 import importlib.util
 import json
 import re
@@ -24,8 +25,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-
-from tinydisplay import homeassistant as library
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMPONENT = REPO_ROOT / "custom_components" / "tinydisplay"
@@ -47,6 +46,11 @@ REQUIREMENT = re.compile(
 
 #: The leading name of a PEP 508 requirement, before any extras or specifier.
 DEPENDENCY_NAME = re.compile(r"[A-Za-z0-9._-]+")
+
+
+def workspace_packages() -> list[str]:
+    """Every package directory in the workspace, read from the tree."""
+    return sorted(item.name for item in PACKAGES.iterdir() if (item / "pyproject.toml").is_file())
 
 
 def load_json(path: Path) -> Any:
@@ -285,13 +289,24 @@ class TestManifest:
                     f"{package} wants {dependency}, workspace has {depended}"
                 )
 
-    def test_the_library_version_matches_its_package(self) -> None:
-        # No longer what the manifest asserts, but still two places the same
-        # number lives, and `__version__` is what a bug report will quote.
+    @pytest.mark.parametrize("package", workspace_packages())
+    def test_the_library_version_matches_its_package(self, package: str) -> None:
+        """Every package, not just this one.
+
+        No longer what the manifest asserts, but still two places the same
+        number lives, and `__version__` is what a bug report will quote.
+
+        Checked across the whole workspace because checking one was not enough:
+        `tinydisplay-widgets` shipped a release with its pyproject at 0.2.0 and
+        its `__version__` still saying 0.1.0, and nothing noticed. The package
+        list is read from the tree rather than written here, so a new package
+        cannot quietly opt out of this.
+        """
+        module = importlib.import_module(f"tinydisplay.{package}")
         pyproject = tomllib.loads(
-            (PACKAGES / "homeassistant" / "pyproject.toml").read_text(encoding="utf-8")
+            (PACKAGES / package / "pyproject.toml").read_text(encoding="utf-8")
         )
-        assert library.__version__ == pyproject["project"]["version"]
+        assert module.__version__ == pyproject["project"]["version"]
 
 
 class TestTranslations:

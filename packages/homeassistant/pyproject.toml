@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tinydisplay-homeassistant"
-version = "0.4.0"
+version = "0.5.0"
 description = "Home Assistant dashboards for TinyDisplay: YAML definitions, entity binding and a change-driven render loop."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -23,7 +23,7 @@ classifiers = [
 ]
 dependencies = [
     # Layout, labels, gauges and theming -- what a dashboard is built from.
-    "tinydisplay-widgets>=0.2,<0.3",
+    "tinydisplay-widgets>=0.3,<0.4",
     # Dashboard definitions are YAML. Home Assistant already ships PyYAML, so
     # this costs nothing in the environment this package actually runs in.
     "pyyaml>=6.0",
