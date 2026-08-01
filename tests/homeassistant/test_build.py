@@ -22,7 +22,17 @@ from tinydisplay.homeassistant import (
     build_dashboard,
     parse_dashboard,
 )
-from tinydisplay.widgets import Gauge, Grid, Icon, Label, Padding, ProgressBar, Sparkline, Stack
+from tinydisplay.widgets import (
+    Gauge,
+    Grid,
+    Icon,
+    IconName,
+    Label,
+    Padding,
+    ProgressBar,
+    Sparkline,
+    Stack,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -147,6 +157,49 @@ class TestColorBinding:
 
         dashboard.update(StaticStateSource({"binary_sensor.door": "off"}))
         assert icon.color == dashboard.theme.success
+
+    def test_a_dynamic_icon_follows_state(self) -> None:
+        dashboard = build(
+            {
+                "type": "icon",
+                "entity": "lock.front_door",
+                "icon": {"locked": "lock", "unlocked": "unlock", "default": "warning"},
+            }
+        )
+        icon = find(dashboard.root, Icon)
+
+        # Read into locals rather than asserting twice on the property: mypy
+        # narrows the first `is` check and then calls the second unreachable,
+        # because it cannot see that `update` reaches back into the widget.
+        dashboard.update(StaticStateSource({"lock.front_door": "locked"}))
+        while_locked = icon.name_of_symbol
+        dashboard.update(StaticStateSource({"lock.front_door": "unlocked"}))
+        while_unlocked = icon.name_of_symbol
+
+        assert while_locked is IconName.LOCK
+        assert while_unlocked is IconName.UNLOCK
+
+    def test_a_changed_symbol_marks_the_icon_dirty(self) -> None:
+        # Dirty tracking is what gets the new symbol onto the panel. An updater
+        # that set the attribute without marking would change the widget and
+        # leave the old glyph on screen until something else forced a repaint.
+        dashboard = build(
+            {
+                "type": "icon",
+                "entity": "lock.front_door",
+                "icon": {"locked": "lock", "default": "unlock"},
+            }
+        )
+        icon = find(dashboard.root, Icon)
+
+        dashboard.update(StaticStateSource({"lock.front_door": "locked"}))
+        icon.mark_clean()
+        dashboard.update(StaticStateSource({"lock.front_door": "unlocked"}))
+        assert icon.is_dirty
+
+    def test_a_fixed_icon_makes_no_updater(self) -> None:
+        built = build_dashboard(parse_dashboard({"root": {"type": "icon", "icon": "bell"}}))
+        assert built.updaters == ()
 
     def test_a_gauge_colour_can_be_dynamic(self) -> None:
         dashboard = build(

@@ -42,7 +42,13 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from tinydisplay.core import Color
-    from tinydisplay.homeassistant.schema import ColorRef, DashboardSpec, NodeSpec, ValueRef
+    from tinydisplay.homeassistant.schema import (
+        ColorRef,
+        DashboardSpec,
+        IconRef,
+        NodeSpec,
+        ValueRef,
+    )
     from tinydisplay.homeassistant.state import StateSource
     from tinydisplay.widgets import Theme
 
@@ -264,12 +270,17 @@ def _build_sparkline(node: NodeSpec, theme: Theme, updaters: list[Updater]) -> W
 
 def _build_icon(node: NodeSpec, theme: Theme, updaters: list[Updater]) -> Widget:
     options = node.options
+    symbol: IconRef = options["icon"]
     icon = Icon(
-        options["icon"],
+        symbol.resolve(),
         thickness=options["thickness"],
         visible=options.get("visible", True),
         widget_name=options.get("name"),
     )
+    if symbol.is_dynamic:
+        updaters.append(
+            lambda source: setattr(icon, "name_of_symbol", symbol.resolve(source)),
+        )
     _bind_color(options["color"], theme, lambda color: setattr(icon, "color", color), updaters)
     return icon
 

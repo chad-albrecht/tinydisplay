@@ -142,6 +142,28 @@ The `icon` node's `icon` is one of `circle` `dot` `square` `check` `cross`
 Naming one that does not exist is a config error listing the ones that do; the
 list is generated from the widget package, so it cannot drift out of date.
 
+It can also be a mapping from entity state to a symbol, the same shape `color`
+takes, so a lock can open:
+
+```yaml
+- type: icon
+  entity: lock.front_door
+  icon:
+    locked: lock
+    unlocked: unlock
+    default: warning
+  color:
+    locked: success
+    unlocked: danger
+    default: muted
+```
+
+A state-mapped icon needs an `entity` on the same node to select from, and —
+unlike a colour — a `default`. A colour that falls off the end of its mapping
+lands on the theme's `text` role, but there is no such thing as a default
+symbol, and an icon with nothing to draw draws nothing, which reads as a broken
+panel rather than a missing case. Both are checked when the dashboard loads.
+
 The cross-axis hint is `cross_align`, not `align`, because a `label` already
 spends `align` on its text. When both were spelled the same, one key was parsed
 by two different enums and only the value they happened to share — `center` —

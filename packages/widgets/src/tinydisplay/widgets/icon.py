@@ -615,6 +615,12 @@ class Icon(Widget):
         """
         return self._symbol
 
+    @name_of_symbol.setter
+    def name_of_symbol(self, value: IconName) -> None:
+        if value != self._symbol:
+            self._symbol = value
+            self.mark_dirty()
+
     @property
     def color(self) -> Color:
         """Ink colour."""

@@ -381,3 +381,18 @@ class TestIcon:
         icon.mark_clean()
         icon.color = INK
         assert icon.is_dirty
+
+    def test_the_symbol_can_be_changed(self) -> None:
+        # A dashboard maps entity state to a symbol -- a lock that opens when
+        # the door unlocks -- so the symbol has to be settable, not just read.
+        icon = Icon(IconName.LOCK, bounds=Rect(0, 0, 16, 16))
+        icon.mark_clean()
+        icon.name_of_symbol = IconName.UNLOCK
+        assert icon.name_of_symbol is IconName.UNLOCK
+        assert icon.is_dirty
+
+    def test_setting_the_same_symbol_leaves_it_clean(self) -> None:
+        icon = Icon(IconName.LOCK, bounds=Rect(0, 0, 16, 16))
+        icon.mark_clean()
+        icon.name_of_symbol = IconName.LOCK
+        assert not icon.is_dirty

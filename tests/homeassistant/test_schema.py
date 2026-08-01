@@ -546,11 +546,79 @@ class TestIconAndImage:
             parse({"type": "icon"})
 
     def test_icon_name_is_parsed(self) -> None:
-        assert parse({"type": "icon", "icon": "warning"}).root.options["icon"] is IconName.WARNING
+        assert parse({"type": "icon", "icon": "warning"}).root.options["icon"].resolve() is (
+            IconName.WARNING
+        )
 
     def test_unknown_icon_lists_the_alternatives(self) -> None:
         with pytest.raises(DashboardConfigError, match=r"root\.icon: unknown value 'rocket'"):
             parse({"type": "icon", "icon": "rocket"})
+
+    def test_an_icon_can_be_chosen_by_state(self) -> None:
+        spec = parse(
+            {
+                "type": "icon",
+                "entity": "lock.front_door",
+                "icon": {"locked": "lock", "unlocked": "unlock", "default": "warning"},
+            }
+        )
+        ref = spec.root.options["icon"]
+
+        assert ref.is_dynamic
+        assert ref.resolve(StaticStateSource({"lock.front_door": "locked"})) is IconName.LOCK
+        assert ref.resolve(StaticStateSource({"lock.front_door": "unlocked"})) is IconName.UNLOCK
+
+    def test_an_unlisted_state_falls_back_to_default(self) -> None:
+        ref = parse(
+            {
+                "type": "icon",
+                "entity": "lock.front_door",
+                "icon": {"locked": "lock", "default": "warning"},
+            }
+        ).root.options["icon"]
+
+        # `jammed` is a real state a lock reports and one this document does not
+        # list. Rendering stays total; the dashboard does not have to be
+        # exhaustive to be safe.
+        assert ref.resolve(StaticStateSource({"lock.front_door": "jammed"})) is IconName.WARNING
+        assert ref.resolve(StaticStateSource({})) is IconName.WARNING
+
+    def test_a_state_mapped_icon_needs_an_entity(self) -> None:
+        with pytest.raises(DashboardConfigError, match="state-dependent icon needs an 'entity'"):
+            parse({"type": "icon", "icon": {"locked": "lock", "default": "unlock"}})
+
+    def test_a_state_mapped_icon_needs_a_default(self) -> None:
+        with pytest.raises(DashboardConfigError, match="state-dependent icon needs a 'default'"):
+            parse(
+                {
+                    "type": "icon",
+                    "entity": "lock.front_door",
+                    "icon": {"locked": "lock", "unlocked": "unlock"},
+                }
+            )
+
+    def test_an_unknown_symbol_in_a_mapping_carries_its_state(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"root\.icon\.locked: unknown value"):
+            parse(
+                {
+                    "type": "icon",
+                    "entity": "lock.front_door",
+                    "icon": {"locked": "padlock", "default": "unlock"},
+                }
+            )
+
+    def test_a_state_mapped_icon_is_subscribed_to(self) -> None:
+        # The render loop only watches entities the document declares, so an
+        # icon that changes with state must put its entity into that set or the
+        # panel would not repaint until something else moved.
+        spec = parse(
+            {
+                "type": "icon",
+                "entity": "lock.front_door",
+                "icon": {"locked": "lock", "default": "unlock"},
+            }
+        )
+        assert "lock.front_door" in spec.root.entity_ids
 
     def test_image_requires_a_path(self) -> None:
         with pytest.raises(DashboardConfigError, match="an image needs 'path'"):

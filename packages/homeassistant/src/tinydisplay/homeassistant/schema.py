@@ -73,6 +73,7 @@ __all__ = [
     "THEME_ROLES",
     "ColorRef",
     "DashboardSpec",
+    "IconRef",
     "Insets",
     "NodeSpec",
     "ScreenSpec",
@@ -186,6 +187,54 @@ class ColorRef:
             resolved: Color = getattr(theme, self.role)
             return resolved
         return theme.text
+
+
+@dataclass(frozen=True, slots=True)
+class IconRef:
+    """Which symbol an icon draws, optionally chosen by entity state.
+
+    The same shape as :class:`ColorRef`, for the same reason: a lock that shows
+    a shut shackle whether or not it is shut is a worse panel than one that
+    changes, and colour alone cannot carry that at a glance.
+
+    Where this differs from a colour is the fallback. An unmapped colour has
+    somewhere to land -- the theme's ``text`` role -- but there is no such thing
+    as a default symbol, and an icon with nothing to draw draws nothing, which
+    reads as a broken panel. So a state mapping must carry a ``default`` key,
+    checked when the dashboard loads rather than discovered when a sensor
+    invents a state nobody listed.
+
+    Attributes:
+        name: The symbol to draw, if this is a fixed reference.
+        states: State-to-symbol mapping, if this is state-dependent.
+        entity_id: The entity whose state selects from ``states``.
+    """
+
+    name: IconName | None = None
+    states: Mapping[str, IconName] = field(default_factory=dict)
+    entity_id: str | None = None
+
+    @property
+    def entity_ids(self) -> frozenset[str]:
+        """Every entity this reference reads, which is at most one."""
+        return frozenset({self.entity_id}) if self.entity_id else frozenset()
+
+    @property
+    def is_dynamic(self) -> bool:
+        """Whether the resolved symbol depends on entity state."""
+        return bool(self.states)
+
+    def resolve(self, source: StateSource | None = None) -> IconName:
+        """The symbol to draw right now.
+
+        Never raises. The ``default`` key is required at parse time, so the
+        lookup below always lands somewhere for a state mapping.
+        """
+        if self.states:
+            entity = source.get(self.entity_id or "") if source is not None else None
+            key = entity.state if entity is not None else "default"
+            return self.states.get(key) or self.states["default"]
+        return self.name or IconName.CIRCLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -308,7 +357,7 @@ class NodeSpec:
 
 def _referenced_entities(value: Any) -> frozenset[str]:
     """Entity ids reachable from one validated option value."""
-    if isinstance(value, Template | ColorRef | ValueRef):
+    if isinstance(value, Template | ColorRef | IconRef | ValueRef):
         return value.entity_ids
     if isinstance(value, str) and is_entity_id(value):
         return frozenset({value})
@@ -854,6 +903,31 @@ def _parse_sparkline(mapping: Mapping[str, Any], path: str) -> dict[str, Any]:
     return options
 
 
+def _icon_ref(value: Any, path: str, *, entity_id: str | None) -> IconRef:
+    """Parse an icon: one symbol name, or a mapping from entity state to one."""
+    if isinstance(value, dict):
+        mapping = _require_mapping(value, path)
+        if entity_id is None:
+            raise _fail(
+                path,
+                "a state-dependent icon needs an 'entity' on the same node to select from",
+            )
+        if "default" not in mapping:
+            raise _fail(
+                path,
+                "a state-dependent icon needs a 'default' symbol; unlike a colour there is "
+                "nothing sensible to fall back to when an entity reports a state not listed "
+                "here, and an icon with no symbol draws nothing",
+            )
+        states = {
+            str(state): _choice(nested, _child_path(path, str(state)), _ICONS)
+            for state, nested in mapping.items()
+        }
+        return IconRef(states=states, entity_id=entity_id)
+
+    return IconRef(name=_choice(value, path, _ICONS))
+
+
 def _parse_icon(mapping: Mapping[str, Any], path: str) -> dict[str, Any]:
     if "icon" not in mapping:
         known = ", ".join(sorted(_ICONS))
@@ -862,7 +936,7 @@ def _parse_icon(mapping: Mapping[str, Any], path: str) -> dict[str, Any]:
         _entity_id(mapping["entity"], _child_path(path, "entity")) if "entity" in mapping else None
     )
     options: dict[str, Any] = {
-        "icon": _choice(mapping["icon"], _child_path(path, "icon"), _ICONS),
+        "icon": _icon_ref(mapping["icon"], _child_path(path, "icon"), entity_id=entity_id),
         "color": (
             _color(mapping["color"], _child_path(path, "color"), entity_id=entity_id)
             if "color" in mapping
