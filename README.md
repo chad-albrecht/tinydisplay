@@ -43,9 +43,14 @@ regenerates them.
 > and with no disconnection banner — so the once-a-second keep-alive does hold
 > the panel's firmware off, which was the largest open question. One machine.
 >
-> **Not established:** reconnection after a replug, the options flow, reload and
-> unload. Those paths exist and are unit-tested; none has been exercised against
-> hardware.
+> **Losing the panel is handled.** Pulled out from under a running instance, the
+> render loop stops with one logged error rather than thrashing, and reloading
+> the entry brings it back. It does not reconnect by itself, on purpose — a task
+> that relaunched itself would hide a dead panel behind a busy log.
+>
+> **Not established:** the options flow against live hardware, and whether any of
+> this holds on a second machine. One appliance has run it, and that is the
+> largest unknown by some distance.
 
 ## Why
 

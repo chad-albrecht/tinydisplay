@@ -329,6 +329,60 @@ Assistant retries. Building the driver only *selects* a transport and touches
 no hardware, so without that the entry would report itself set up while the
 render task died quietly behind it.
 
+### If the panel loses the host
+
+**Reload the entry.** Settings → Devices & Services → TinyDisplay → ⋮ →
+**Reload**. That is the recovery path, and it is the whole of it.
+
+The render loop does not reconnect on its own, and that is deliberate rather
+than missing. A dashboard error skips one frame and keeps the loop running,
+because a template bug must not take the panel down. A *driver* error is
+different: it means the panel itself is gone, so the loop stops and logs one
+`TinyDisplay render loop stopped` with a traceback. A task that relaunched
+itself would hide a dead panel behind a busy log, which is worse than a panel
+that is visibly dead.
+
+Verified by pulling the panel out from under a running instance
+(2026-08-01, HA OS 18.1 / Core 2026.7.4):
+
+| What happened | What the panel did |
+| --- | --- |
+| USB device de-authorised | Disconnection banner, within about a second |
+| Device re-authorised | Banner stays — the device is back, nothing is driving it |
+| Entry reloaded | Banner clears, rotation resumes |
+
+Exactly one error was logged, not a flood, and the panel came back on the same
+`/sys` path it left from.
+
+The banner is therefore a reliable "nothing is driving me" indicator, not just
+a startup nuisance: the firmware raises it within about a second of the
+keep-alive stopping, whatever the reason. If you see it and it stays, the loop
+has stopped and the log will say why.
+
+Forcing a disconnect on Home Assistant OS is harder than it sounds, and three
+routes do not work. The Terminal add-on has `/sys` mounted read-only;
+`docker exec hassio_supervisor` is refused with `Permission denied`. What works
+is a privileged throwaway container:
+
+```bash
+docker run --rm --privileged -v /sys:/sys:rw alpine \
+  sh -c 'echo 0 > /sys/bus/usb/devices/1-8/authorized'   # 1 to restore
+```
+
+Find the path first rather than assuming `1-8`, which is this machine's:
+
+```bash
+for d in /sys/bus/usb/devices/*/; do
+  [ "$(cat "$d/idVendor" 2>/dev/null)" = "04d9" ] &&
+  [ "$(cat "$d/idProduct" 2>/dev/null)" = "fd01" ] &&
+  echo "${d%/}"
+done
+```
+
+`04d9` is Holtek, whose controllers are in a great many USB keyboards. The
+product id is what makes this specific. If that loop prints more than one path,
+do not guess — de-authorising the wrong device disconnects it.
+
 ## How it is put together
 
 ```text
@@ -377,16 +431,26 @@ frame on the glass, and a still frame of plausible numbers is indistinguishable
 from a working panel — which is the same shape of mistake as the bring-up that
 "verified" Phase 3 without noticing the picture was upside down.
 
-**Not established.** The rest of the long run:
+**Losing the panel is handled, and reload brings it back.** The panel was
+de-authorised out from under a running instance: the loop stopped with one
+logged error, the firmware raised its banner, and reloading the entry restored
+it. That also exercises entry unload and setup against hardware for the first
+time, since a reload is both. See
+[If the panel loses the host](#if-the-panel-loses-the-host).
 
-- Reconnection after the panel is replugged, and the driver's retry path.
-- The options flow, entry reload and entry unload. All unit-tested, none run
-  against hardware.
-- Whether any of this holds on a second machine. One appliance has run it.
+**Not established.**
+
+- The options flow itself. Changing an option reloads the entry, and the reload
+  half is now proven, but nobody has submitted that form against a live panel.
+- Whether any of this holds on a second machine. One appliance has run it, and
+  that is the largest unknown by some distance.
 
 **Rough edges.**
 
 - No entities or device are published back to Home Assistant, so nothing in the
   UI tells you whether the panel is being drawn to. The logs are currently the
-  only answer.
+  only answer, and the disconnect test above is the argument for fixing it: the
+  panel sat dead with the entry still reporting itself healthy, and the single
+  line in the log was the only thing that knew. A binary sensor fed by
+  `on_frame` would say it on the dashboard.
 - No service to reload a dashboard without reloading the entry.

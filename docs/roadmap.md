@@ -236,9 +236,15 @@ and with no disconnection banner, so the keep-alive does what Phase 3 could
 only assume. Rotation is the part that matters as evidence — a dead render loop
 leaves a last frame that looks exactly like a live one.
 
-Still open: reconnection after a replug, the options flow, reload and unload --
-all unit-tested, none exercised against hardware -- and everything about a
-second machine. See
+Losing the panel is settled too, by de-authorising it out from under a running
+instance: the loop stops with one logged error, the firmware raises its banner
+within a second, and reloading the entry restores everything. No automatic
+reconnection, by design -- a task that relaunched itself would hide a dead
+panel behind a busy log. The reload doubles as the first hardware exercise of
+entry unload and setup.
+
+Still open: the options flow against a live panel, and everything about a
+second machine -- which is now the largest unknown here by some distance. See
 [the integration's README](../custom_components/tinydisplay/README.md).
 
 ## Beyond
