@@ -6,12 +6,15 @@ it, recolours with the theme, costs no asset pipeline and adds no dependency,
 and a status panel needs a few dozen symbols rather than a library of them.
 
 The cost is that the set is small and everything in it is a shape the available
-primitives can make -- lines, rectangles, circles, and triangles and trapezoids
-filled by scanline.
-Anything needing a genuine arc is absent rather than approximated badly: there
-is no crescent moon and no gapped power ring, and the padlock's shackle is
-square-topped because that is the honest pixel-art form rather than a stepped
-semicircle pretending to be smooth. For a logo or a weather glyph, use
+primitives can make -- lines, rectangles, rounded rectangles, circles, and
+triangles and trapezoids filled by scanline.
+
+Part of an arc is reachable too, by drawing a whole shape under a clip: the
+padlock's shackle is a rounded rectangle tall enough to have a semicircular
+top, with its lower half clipped away. What stays out of reach is anything
+needing an arc *subtracted* rather than cropped, because nothing here can
+erase. Hence no crescent moon, and a `power` ring that is closed where the IEC
+symbol breaks it. For a logo or a weather glyph, use
 :class:`~tinydisplay.widgets.image.ImageWidget`.
 
 Every icon is drawn inside a square inscribed in the widget's bounds, so a
@@ -291,9 +294,13 @@ def _padlock(
 ) -> None:
     """Draw a padlock, with the shackle either closed or swung open on the left.
 
-    The shackle is square-topped. With no arc primitive the alternative is a
-    stepped semicircle, which at icon sizes reads as a mistake rather than as a
-    curve; a squared shackle is a deliberate pixel-art form instead.
+    The shackle is a rounded rectangle tall enough for its corner radius to be
+    a true semicircle, drawn twice under two clips: the right half down to the
+    body, the left half down to wherever that leg ends. Only the arch and the
+    legs survive; the rounded bottom is always clipped away.
+
+    Two clips rather than one because the open shackle's legs are different
+    lengths, and there is no way to shorten one side of a single shape.
     """
     flank = box.width // 5
     body = Rect(
@@ -308,11 +315,37 @@ def _padlock(
     top = box.y + box.height // 8
     inset = max(1, box.width // 8)
     left = body.x + inset
-    right = body.right - 1 - inset
-    canvas.line(left, top, right, top, color, thickness=thickness)
-    canvas.line(right, top, right, body.y, color, thickness=thickness)
-    open_to = top + (body.y - top) // 2 if shackle_open else body.y
-    canvas.line(left, top, left, open_to, color, thickness=thickness)
+    right = body.right - inset
+    span = right - left
+    # Below two pixels across there is no arch to draw, only a smudge; the body
+    # and keyhole above still carry the icon at that size.
+    min_span = 2
+    if span < min_span or body.y <= top:
+        return
+
+    # Taller than it is wide, so `rounded_rect` does not clamp the radius and
+    # the top is a genuine semicircle rather than a flattened one.
+    height = (body.y - top) + span
+
+    def arc(region: Rect) -> None:
+        if region.is_empty:
+            return
+        with canvas.clip(region):
+            canvas.rounded_rect(
+                left,
+                top,
+                span,
+                height,
+                color,
+                radius=span // 2,
+                fill=False,
+                thickness=thickness,
+            )
+
+    middle = left + span // 2
+    arc(Rect.from_bounds(middle, top, right, body.y))
+    open_to = top + (body.y - top) * 2 // 3 if shackle_open else body.y
+    arc(Rect.from_bounds(left, top, middle, open_to))
 
 
 def _draw_lock(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:

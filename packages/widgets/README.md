@@ -91,9 +91,9 @@ the dashboard and would otherwise produce a silently wrong panel.
 ## Icons are drawn, not loaded
 
 The icon set is small and every symbol is a shape the canvas primitives can
-make — lines, rectangles, circles, and triangles and trapezoids filled by
-scanline. Drawn icons scale to their box, recolour with the theme, and need no
-asset pipeline.
+make — lines, rectangles, rounded rectangles, circles, and triangles and
+trapezoids filled by scanline. Drawn icons scale to their box, recolour with
+the theme, and need no asset pipeline.
 
 | Group | Symbols |
 | --- | --- |
@@ -102,8 +102,10 @@ asset pipeline.
 | Sensors and weather | `thermometer` `droplet` `sun` `cloud` `wind` `fan` `flame` |
 | Status and connectivity | `bolt` `battery` `power` `wifi` `signal` `clock` `bell` |
 
-Anything requiring a genuine arc is absent rather than approximated badly: no
-crescent moon, no gapped power ring, and a square-topped padlock shackle. For a
+Part of an arc is reachable by drawing a whole shape under a clip — that is how
+the padlock gets a semicircular shackle. What is out of reach is an arc that has
+to be *subtracted* rather than cropped, because nothing here can erase: hence no
+crescent moon, and a `power` ring closed where the IEC symbol breaks it. For a
 logo or a weather glyph, use `ImageWidget`.
 
 ## Not here
