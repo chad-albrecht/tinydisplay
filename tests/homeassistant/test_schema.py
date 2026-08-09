@@ -540,6 +540,80 @@ class TestNumericWidgets:
             parse({"type": "gauge", "entity": "sensor.a", "warning_at": -0.5})
 
 
+class TestGaugeZones:
+    """The colour bands, whose boundaries are in the gauge's own units."""
+
+    def gauge(self, **extra: object) -> dict[str, object]:
+        return {"type": "gauge", "entity": "sensor.cpu", "min": 30, "max": 90, **extra}
+
+    def test_zones_parse_in_order(self) -> None:
+        options = parse(
+            self.gauge(
+                zones=[
+                    {"to": 65, "color": "success"},
+                    {"to": 78, "color": "warning"},
+                    {"color": "danger"},
+                ]
+            )
+        ).root.options
+        assert [zone.upto for zone in options["zones"]] == [65.0, 78.0, None]
+        assert [zone.color.role for zone in options["zones"]] == ["success", "warning", "danger"]
+
+    def test_a_gauge_without_zones_has_none(self) -> None:
+        assert "zones" not in parse(self.gauge()).root.options
+
+    def test_a_fraction_where_a_value_belongs_is_caught(self) -> None:
+        # The mistake the value-units choice invites: 0.8 looks like "80%" and
+        # is in fact a band below the gauge's minimum that could never light.
+        with pytest.raises(
+            DashboardConfigError,
+            match=r"root\.zones\[0\]\.to: 0\.8 is outside the gauge's range 30\.0\.\.90\.0",
+        ):
+            parse(self.gauge(zones=[{"to": 0.8, "color": "danger"}]))
+
+    def test_boundaries_must_increase(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"zones\[1\]\.to: zone boundaries must"):
+            parse(
+                self.gauge(zones=[{"to": 78, "color": "warning"}, {"to": 65, "color": "success"}])
+            )
+
+    def test_only_the_last_zone_may_be_open_ended(self) -> None:
+        with pytest.raises(DashboardConfigError, match="only the last zone may leave out 'to'"):
+            parse(self.gauge(zones=[{"color": "success"}, {"to": 78, "color": "danger"}]))
+
+    def test_a_zone_needs_a_colour(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"zones\[0\]: a zone needs 'color'"):
+            parse(self.gauge(zones=[{"to": 65}]))
+
+    def test_unknown_zone_keys_are_named(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"unknown key\(s\): colour"):
+            parse(self.gauge(zones=[{"to": 65, "colour": "success"}]))
+
+    def test_an_empty_zone_list_is_refused(self) -> None:
+        with pytest.raises(DashboardConfigError, match="needs at least one band"):
+            parse(self.gauge(zones=[]))
+
+    def test_zones_must_be_a_list(self) -> None:
+        with pytest.raises(DashboardConfigError, match="expected a list of zones"):
+            parse(self.gauge(zones={"to": 65, "color": "success"}))
+
+    def test_zone_colours_cannot_depend_on_state(self) -> None:
+        # Same reason as a track colour: the widget takes its zones once.
+        with pytest.raises(DashboardConfigError, match="fixed when the widget is built"):
+            parse(self.gauge(zones=[{"to": 65, "color": {"on": "danger"}}]))
+
+    def test_zones_and_warning_at_together_are_refused(self) -> None:
+        with pytest.raises(DashboardConfigError, match="'zones' or 'warning_at', not both"):
+            parse(self.gauge(zones=[{"color": "danger"}], warning_at=0.8))
+
+    def test_thickness_parses(self) -> None:
+        assert parse(self.gauge(thickness=8)).root.options["thickness"] == 8
+
+    def test_thickness_must_be_at_least_one_pixel(self) -> None:
+        with pytest.raises(DashboardConfigError, match=r"root\.thickness: must be at least 1"):
+            parse(self.gauge(thickness=0))
+
+
 class TestIconAndImage:
     def test_icon_requires_a_symbol(self) -> None:
         with pytest.raises(DashboardConfigError, match="an icon needs 'icon'"):

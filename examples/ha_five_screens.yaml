@@ -50,15 +50,56 @@ screens:
               wrap: false
               shrink_to_fit: true
 
-        - type: label
+        - type: stack
+          axis: horizontal
           weight: 1
-          text: "{{ weather.forecast_home.temperature | round(0) }}°"
-          color: accent
-          font_size: 60
-          align: center
-          valign: middle
-          wrap: false
-          shrink_to_fit: true
+          spacing: 10
+          children:
+            # A weather entity's state *is* its condition, so one state-mapped
+            # icon covers the whole forecast. All fifteen of Home Assistant's
+            # conditions are listed; `default` still earns its place, because
+            # a weather entity reports `unavailable` while it starts up and
+            # `unknown` if its backend fails, and neither is a condition.
+            - type: icon
+              size: 66
+              cross_align: center
+              cross_size: 66
+              thickness: 4
+              entity: weather.forecast_home
+              icon:
+                sunny: sun
+                clear-night: moon
+                partlycloudy: cloud-sun
+                cloudy: cloud
+                fog: fog
+                rainy: cloud-rain
+                pouring: cloud-rain
+                snowy: cloud-snow
+                snowy-rainy: cloud-snow
+                hail: cloud-snow
+                lightning: cloud-lightning
+                lightning-rainy: cloud-lightning
+                windy: wind
+                windy-variant: wind
+                exceptional: warning
+                default: cloud
+              color:
+                sunny: warning
+                clear-night: muted
+                lightning: warning
+                lightning-rainy: warning
+                exceptional: danger
+                default: text
+
+            - type: label
+              weight: 1
+              text: "{{ weather.forecast_home.temperature | round(0) }}°"
+              color: accent
+              font_size: 60
+              align: center
+              valign: middle
+              wrap: false
+              shrink_to_fit: true
 
         - type: stack
           axis: horizontal
@@ -217,6 +258,29 @@ screens:
               align: right
               valign: middle
               wrap: false
+
+        # CPU temperature as a bargraph. `zones` colours each segment by where
+        # it sits in the range rather than recolouring the whole bar, so the
+        # green end stays green while the tip goes red -- headroom and level in
+        # one glance. Boundaries are in degrees, the same units as min/max.
+        #
+        # `thickness` keeps it a thin band: the gauge still owns a 12px slot,
+        # but draws 6px centred in it, so the row breathes.
+        - type: gauge
+          size: 12
+          thickness: 6
+          entity: sensor.processor_temperature
+          min: 30
+          max: 90
+          segments: 24
+          gap: 1
+          track_color: surface
+          zones:
+            - to: 65
+              color: success
+            - to: 78
+              color: warning
+            - color: danger
 
         - type: grid
           weight: 1

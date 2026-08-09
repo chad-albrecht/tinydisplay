@@ -48,7 +48,7 @@ from __future__ import annotations
 from tinydisplay.widgets.errors import LayoutError, WidgetError
 from tinydisplay.widgets.icon import Icon, IconName
 from tinydisplay.widgets.image import ImageWidget
-from tinydisplay.widgets.indicators import Gauge, ProgressBar, Sparkline
+from tinydisplay.widgets.indicators import Gauge, ProgressBar, Sparkline, Zone
 from tinydisplay.widgets.label import MIN_FONT_SIZE, Label, wrap_text
 from tinydisplay.widgets.layout import Align, Axis, Grid, Padding, Slot, Spacer, Stack
 from tinydisplay.widgets.theme import (
@@ -86,6 +86,7 @@ __all__ = [
     "Stack",
     "Theme",
     "WidgetError",
+    "Zone",
     "__version__",
     "wrap_text",
 ]

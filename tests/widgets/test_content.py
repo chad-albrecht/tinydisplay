@@ -19,10 +19,14 @@ from tinydisplay.widgets import (
     ProgressBar,
     Sparkline,
     WidgetError,
+    Zone,
     wrap_text,
 )
 
 INK = Color.from_hex("#ff0000")
+GREEN = Color.from_hex("#00ff00")
+AMBER = Color.from_hex("#ffbb00")
+CRIMSON = Color.from_hex("#cc0033")
 
 
 def painted(canvas: Canvas, color: Color) -> int:
@@ -282,6 +286,133 @@ class TestGauge:
             Gauge(0, warning_at=1.5)
 
 
+class TestGaugeZones:
+    """Colour bands, which colour each segment by where it sits in the range."""
+
+    ZONES = (Zone(60, GREEN), Zone(80, AMBER), Zone(None, CRIMSON))
+
+    def gauge(self, value: float, **kwargs: object) -> Gauge:
+        return Gauge(
+            value,
+            segments=10,
+            gap=0,
+            color=INK,
+            zones=self.ZONES,
+            bounds=Rect(0, 0, 100, 10),
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+    def test_each_segment_takes_the_colour_of_the_band_it_sits_in(self) -> None:
+        # Ten segments over 0..100, so midpoints fall at 5, 15 ... 95: six below
+        # 60, two below 80, two above. Each segment is a 10x10 block.
+        canvas = Canvas(100, 10)
+        self.gauge(100).draw(canvas)
+        assert painted(canvas, GREEN) == 600
+        assert painted(canvas, AMBER) == 200
+        assert painted(canvas, CRIMSON) == 200
+
+    def test_a_low_value_lights_only_the_green_band(self) -> None:
+        # The point of zones over a threshold: the tip of a cool gauge is still
+        # green, rather than the whole bar being one state colour.
+        canvas = Canvas(100, 10)
+        self.gauge(40).draw(canvas)
+        assert painted(canvas, GREEN) == 400
+        assert painted(canvas, AMBER) == 0
+        assert painted(canvas, CRIMSON) == 0
+
+    def test_the_green_band_survives_the_bar_going_red(self) -> None:
+        canvas = Canvas(100, 10)
+        self.gauge(90).draw(canvas)
+        assert painted(canvas, GREEN) == 600
+        assert painted(canvas, CRIMSON) == 100
+
+    def test_a_boundary_inside_a_segment_goes_to_the_majority_side(self) -> None:
+        # Boundary at 62 splits segment 6 (60..70) 20/80, so it reads as amber.
+        gauge = Gauge(100, segments=10, zones=[Zone(62, GREEN), Zone(None, AMBER)])
+        assert gauge.segment_color(5) == GREEN
+        assert gauge.segment_color(6) == AMBER
+
+    def test_boundaries_are_value_units_not_fractions(self) -> None:
+        # A 30..90 gauge: 65 means 65 degrees, and the band ends there whatever
+        # the maximum is.
+        gauge = Gauge(90, minimum=30, maximum=90, segments=6, zones=[Zone(65, GREEN)])
+        # Midpoints at 35, 45, 55, 65, 75, 85 -- the first three are below 65.
+        assert [gauge.segment_color(i) for i in range(3)] == [GREEN] * 3
+        assert gauge.segment_color(3) != GREEN
+
+    def test_segments_past_the_last_band_fall_back_to_the_plain_colour(self) -> None:
+        gauge = Gauge(100, segments=10, color=INK, zones=[Zone(50, GREEN)])
+        assert gauge.segment_color(0) == GREEN
+        assert gauge.segment_color(9) == INK
+
+    def test_unlit_segments_still_use_the_track_colour(self) -> None:
+        canvas = Canvas(100, 10)
+        self.gauge(30, track_color=CRIMSON).draw(canvas)
+        assert painted(canvas, GREEN) == 300
+        assert painted(canvas, CRIMSON) == 700
+
+    def test_zones_and_a_warning_threshold_together_are_refused(self) -> None:
+        with pytest.raises(WidgetError, match="'zones' or 'warning_at', not both"):
+            Gauge(0, zones=[Zone(None, GREEN)], warning_at=0.8)
+
+    def test_boundaries_must_increase(self) -> None:
+        with pytest.raises(WidgetError, match="boundaries must increase"):
+            Gauge(0, zones=[Zone(80, GREEN), Zone(60, AMBER)])
+
+    def test_an_open_ended_band_must_come_last(self) -> None:
+        with pytest.raises(WidgetError, match="only the last zone may be open-ended"):
+            Gauge(0, zones=[Zone(None, GREEN), Zone(80, AMBER)])
+
+    def test_no_zones_leaves_the_threshold_behaviour_alone(self) -> None:
+        gauge = Gauge(90, segments=10, color=INK, warning_at=0.8, warning_color=AMBER)
+        assert gauge.segment_color(0) == AMBER
+        assert gauge.zones == ()
+
+
+class TestGaugeThickness:
+    """A bar narrower than its slot, centred in it."""
+
+    def test_it_narrows_the_bar_and_centres_it(self) -> None:
+        canvas = Canvas(100, 20)
+        Gauge(100, segments=10, gap=0, color=INK, thickness=6, bounds=Rect(0, 0, 100, 20)).draw(
+            canvas
+        )
+        assert painted(canvas, INK) == 600
+        # Centred: rows 7..12 painted, the ones either side clear.
+        assert canvas.get_pixel(50, 10) == INK
+        assert canvas.get_pixel(50, 2) != INK
+        assert canvas.get_pixel(50, 18) != INK
+
+    def test_a_vertical_gauge_narrows_across_its_width(self) -> None:
+        canvas = Canvas(20, 100)
+        Gauge(
+            100,
+            segments=10,
+            gap=0,
+            color=INK,
+            thickness=6,
+            vertical=True,
+            bounds=Rect(0, 0, 20, 100),
+        ).draw(canvas)
+        assert painted(canvas, INK) == 600
+        assert canvas.get_pixel(10, 50) == INK
+        assert canvas.get_pixel(2, 50) != INK
+
+    def test_a_thickness_larger_than_the_bounds_just_fills_them(self) -> None:
+        canvas = Canvas(100, 10)
+        Gauge(100, segments=10, gap=0, color=INK, thickness=40, bounds=Rect(0, 0, 100, 10)).draw(
+            canvas
+        )
+        assert painted(canvas, INK) == 1000
+
+    def test_no_thickness_fills_the_bounds(self) -> None:
+        assert Gauge(0, bounds=Rect(0, 0, 100, 20)).thickness is None
+
+    def test_a_thickness_below_one_pixel_is_refused(self) -> None:
+        with pytest.raises(WidgetError, match="at least 1 pixel"):
+            Gauge(0, thickness=0)
+
+
 class TestSparkline:
     def test_it_draws_a_line(self) -> None:
         canvas = Canvas(40, 20)
@@ -396,3 +527,95 @@ class TestIcon:
         icon.mark_clean()
         icon.name_of_symbol = IconName.LOCK
         assert not icon.is_dirty
+
+
+class TestWeatherIcons:
+    """The glyphs a `weather` entity's condition maps onto.
+
+    The whole-set tests above already check that each one draws and stays in
+    bounds. These check the things that make a weather glyph *that* glyph, and
+    which a shape bug would leave passing: the moon has a bite, the composites
+    put weather under their cloud, and no two of them are the same picture.
+    """
+
+    COMPOSITES = (
+        IconName.CLOUD_SUN,
+        IconName.CLOUD_RAIN,
+        IconName.CLOUD_SNOW,
+        IconName.CLOUD_LIGHTNING,
+        IconName.FOG,
+    )
+
+    def render(self, symbol: IconName, size: int = 40) -> Canvas:
+        canvas = Canvas(size, size)
+        Icon(symbol, color=INK, thickness=3, bounds=Rect(0, 0, size, size)).draw(canvas)
+        return canvas
+
+    def test_the_moon_is_a_crescent_not_a_disc(self) -> None:
+        # The bite is computed rather than erased, so the failure mode is a
+        # full disc -- which passes "draws something" and is not a moon.
+        moon = painted(self.render(IconName.MOON), INK)
+        disc = painted(self.render(IconName.DOT), INK)
+        assert moon < disc
+
+    def test_the_crescent_opens_to_the_right(self) -> None:
+        canvas = self.render(IconName.MOON)
+        columns = [
+            sum(1 for y in range(canvas.height) if canvas.get_pixel(x, y) == INK)
+            for x in range(canvas.width)
+        ]
+        left = sum(columns[: canvas.width // 2])
+        right = sum(columns[canvas.width // 2 :])
+        assert left > right
+
+    @pytest.mark.parametrize("symbol", COMPOSITES)
+    def test_a_composite_paints_below_its_cloud(self, symbol: IconName) -> None:
+        # A plain cloud stops around 80% of the way down; every composite puts
+        # something under it, so the bottom rows must not be empty.
+        canvas = self.render(symbol)
+        floor = canvas.height * 82 // 100
+        below = sum(
+            1
+            for y in range(floor, canvas.height)
+            for x in range(canvas.width)
+            if canvas.get_pixel(x, y) == INK
+        )
+        assert below > 0, symbol
+
+    def test_a_plain_cloud_leaves_the_floor_clear(self) -> None:
+        # The premise of the test above.
+        canvas = self.render(IconName.CLOUD)
+        floor = canvas.height * 82 // 100
+        assert not [
+            (x, y)
+            for y in range(floor, canvas.height)
+            for x in range(canvas.width)
+            if canvas.get_pixel(x, y) == INK
+        ]
+
+    def test_cloud_sun_puts_the_sun_above_its_cloud(self) -> None:
+        # The sun is drawn first and occluded by the cloud, so what proves it
+        # is there is ink in the top-right corner, where a cloud alone has none.
+        def top_right(symbol: IconName) -> int:
+            # Above where any cloud in the set starts, and right of its dome.
+            canvas = self.render(symbol)
+            return sum(
+                1
+                for y in range(canvas.height * 22 // 100)
+                for x in range(canvas.width * 60 // 100, canvas.width)
+                if canvas.get_pixel(x, y) == INK
+            )
+
+        assert top_right(IconName.CLOUD) == 0
+        assert top_right(IconName.CLOUD_SUN) > 0
+
+    def test_every_weather_glyph_is_a_different_picture(self) -> None:
+        # Composites share a cloud, so a copy-paste slip in one of the painters
+        # produces two identical icons rather than a crash.
+        weather = [IconName.SUN, IconName.MOON, IconName.CLOUD, *self.COMPOSITES]
+        renders = {symbol: self.render(symbol).buffer.tobytes() for symbol in weather}
+        assert len(set(renders.values())) == len(weather)
+
+    def test_they_survive_the_smallest_size_a_panel_would_use(self) -> None:
+        for symbol in (IconName.MOON, *self.COMPOSITES):
+            assert painted(self.render(symbol, size=16), INK) > 0, symbol

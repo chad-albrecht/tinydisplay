@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import itertools
 import math
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from tinydisplay.core import Color, Rect, Widget
@@ -28,7 +29,7 @@ if TYPE_CHECKING:
 
     from tinydisplay.core import Canvas
 
-__all__ = ["Gauge", "ProgressBar", "Sparkline"]
+__all__ = ["Gauge", "ProgressBar", "Sparkline", "Zone"]
 
 
 def _fraction(value: float, minimum: float, maximum: float) -> float:
@@ -36,6 +37,32 @@ def _fraction(value: float, minimum: float, maximum: float) -> float:
     if maximum == minimum:
         return 0.0
     return max(0.0, min(1.0, (value - minimum) / (maximum - minimum)))
+
+
+def _checked_zones(zones: Sequence[Zone] | None) -> tuple[Zone, ...]:
+    """Validate colour bands at construction, where a mistake can still be named.
+
+    Order is the whole meaning of the list -- each zone runs from the previous
+    boundary up to its own -- so an out-of-order boundary is not a band that
+    draws oddly, it is a band that never draws at all. Same for an open-ended
+    zone anywhere but last: everything after it is unreachable.
+    """
+    if not zones:
+        return ()
+    ordered = tuple(zones)
+    for index, zone in enumerate(ordered):
+        if zone.upto is None and index != len(ordered) - 1:
+            msg = (
+                f"only the last zone may be open-ended, but zone {index} of {len(ordered)} "
+                f"has no 'upto'; zones after it could never be reached"
+            )
+            raise WidgetError(msg)
+    boundaries = [zone.upto for zone in ordered if zone.upto is not None]
+    for previous, current in itertools.pairwise(boundaries):
+        if current <= previous:
+            msg = f"zone boundaries must increase, got {previous} then {current}"
+            raise WidgetError(msg)
+    return ordered
 
 
 class _Ranged(Widget):
@@ -191,22 +218,64 @@ class ProgressBar(_Ranged):
             canvas.rect(area.x, area.y, area.width, area.height, color)
 
 
+@dataclass(frozen=True, slots=True)
+class Zone:
+    """A band of a gauge's range that lights in its own colour.
+
+    Attributes:
+        upto: The top of the band, in the gauge's value units -- so a gauge
+            reading 30..90 degrees takes ``65``, not ``0.58``. ``None`` means
+            "everything above the band below", which the topmost zone wants:
+            it keeps the red end red when the maximum moves.
+        color: What segments inside the band draw as when lit.
+
+    Boundaries are value units rather than fractions because the number a
+    dashboard author knows is the one the sensor reports. Raising a gauge's
+    ``maximum`` should not quietly slide the green zone up with it.
+
+    Example:
+        >>> from tinydisplay.core import Color
+        >>> from tinydisplay.widgets import Zone
+        >>> zones = [Zone(65, Color.GREEN), Zone(78, Color.YELLOW), Zone(None, Color.RED)]
+        >>> zones[0].upto
+        65
+    """
+
+    upto: float | None
+    color: Color
+
+
 class Gauge(_Ranged):
     """A segmented meter.
 
     Args:
         value: Current value.
         segments: How many blocks to divide the range into.
-        color: Colour of lit segments.
+        color: Colour of lit segments, and of any segment no zone covers.
         track_color: Colour of unlit segments. ``None`` leaves them unpainted.
         gap: Pixels between segments.
         vertical: Fill upwards instead of rightwards.
-        warning_at: Fraction above which lit segments use ``warning_color``.
+        thickness: How thick the bar is across its short axis, in pixels,
+            centred in the widget's bounds. ``None`` fills the bounds.
+        zones: Bands that colour segments by where each one sits in the range,
+            lowest first. Mutually exclusive with ``warning_at``.
+        warning_at: Fraction above which *every* lit segment uses
+            ``warning_color``. The two-state form that predates ``zones``.
         warning_color: The colour to switch to.
 
-    The threshold colouring is the reason to prefer this over a bar for
-    anything with a "too much" end: a gauge that turns amber at 80% is read
-    correctly from across a room, where a bar's exact length is not.
+    Discrete segments are the reason to prefer this over a bar for anything
+    with a "too much" end: a meter that turns amber at 80% is read correctly
+    from across a room, where a bar's exact length is not.
+
+    ``zones`` and ``warning_at`` say different things and only one can be
+    right at a time, so passing both raises rather than picking:
+
+    - ``warning_at`` colours by the *value*. The whole lit run turns amber
+      together, which reads as a state -- this thing is now too hot.
+    - ``zones`` colours by *position*. Each segment takes the colour of the
+      band it occupies, so a hot gauge is green then amber then red along its
+      length, like an LED bargraph. The green zone stays green while the tip
+      goes red, which shows headroom as well as level.
 
     Example:
         >>> from tinydisplay.core import Canvas, Rect
@@ -216,7 +285,16 @@ class Gauge(_Ranged):
         6
     """
 
-    __slots__ = ("_color", "_gap", "_segments", "_track_color", "_vertical", "_warning")
+    __slots__ = (
+        "_color",
+        "_gap",
+        "_segments",
+        "_thickness",
+        "_track_color",
+        "_vertical",
+        "_warning",
+        "_zones",
+    )
 
     def __init__(
         self,
@@ -229,6 +307,8 @@ class Gauge(_Ranged):
         track_color: Color | None = None,
         gap: int = 2,
         vertical: bool = False,
+        thickness: int | None = None,
+        zones: Sequence[Zone] | None = None,
         warning_at: float | None = None,
         warning_color: Color | None = None,
         bounds: Rect | None = None,
@@ -241,8 +321,17 @@ class Gauge(_Ranged):
         if gap < 0:
             msg = f"gap must be non-negative, got {gap}"
             raise WidgetError(msg)
+        if thickness is not None and thickness < 1:
+            msg = f"thickness must be at least 1 pixel, got {thickness}"
+            raise WidgetError(msg)
         if warning_at is not None and not 0.0 <= warning_at <= 1.0:
             msg = f"warning_at is a fraction between 0 and 1, got {warning_at}"
+            raise WidgetError(msg)
+        if zones and warning_at is not None:
+            msg = (
+                "a gauge takes 'zones' or 'warning_at', not both: one colours segments by "
+                "position and the other recolours all of them by value"
+            )
             raise WidgetError(msg)
         super().__init__(
             value,
@@ -257,6 +346,8 @@ class Gauge(_Ranged):
         self._track_color = track_color
         self._gap = gap
         self._vertical = vertical
+        self._thickness = thickness
+        self._zones = _checked_zones(zones)
         self._warning = (warning_at, warning_color or Color.from_hex("#ffb703"))
 
     @property
@@ -266,7 +357,7 @@ class Gauge(_Ranged):
 
     @property
     def color(self) -> Color:
-        """Colour of lit segments, below the warning threshold."""
+        """Colour of lit segments no zone covers, and below the warning threshold."""
         return self._color
 
     @color.setter
@@ -274,6 +365,16 @@ class Gauge(_Ranged):
         if value != self._color:
             self._color = value
             self.mark_dirty()
+
+    @property
+    def zones(self) -> tuple[Zone, ...]:
+        """The colour bands, lowest first. Empty when the gauge has none."""
+        return self._zones
+
+    @property
+    def thickness(self) -> int | None:
+        """How thick the bar draws, or ``None`` to fill the bounds."""
+        return self._thickness
 
     @property
     def lit_segments(self) -> int:
@@ -293,14 +394,41 @@ class Gauge(_Ranged):
         threshold = self._warning[0]
         return threshold is not None and self.fraction >= threshold
 
+    def segment_color(self, index: int) -> Color:
+        """The colour segment ``index`` lights in.
+
+        Zones are matched on the segment's midpoint, so a boundary that falls
+        inside a segment gives that segment to whichever side holds most of
+        it, rather than to whichever side the rounding happened to favour.
+        """
+        if not self._zones:
+            return self._warning[1] if self.is_warning else self._color
+        midpoint = self._minimum + (index + 0.5) / self._segments * (self._maximum - self._minimum)
+        for zone in self._zones:
+            if zone.upto is None or midpoint < zone.upto:
+                return zone.color
+        # Zones that stop short of the maximum leave a tail; the plain colour
+        # is a better answer there than refusing to draw.
+        return self._color
+
+    def _bar_area(self) -> Rect:
+        """The bounds narrowed to ``thickness`` and centred, if one was given."""
+        area = self.bounds
+        if self._thickness is None:
+            return area
+        if self._vertical:
+            width = min(self._thickness, area.width)
+            return Rect(area.x + (area.width - width) // 2, area.y, width, area.height)
+        height = min(self._thickness, area.height)
+        return Rect(area.x, area.y + (area.height - height) // 2, area.width, height)
+
     def render(self, canvas: Canvas) -> None:
         """Draw every segment, lit or not."""
-        area = self.bounds
+        area = self._bar_area()
         if area.is_empty:
             return
 
         lit = self.lit_segments
-        color = self._warning[1] if self.is_warning else self._color
         total = area.height if self._vertical else area.width
         inner = max(0, total - self._gap * (self._segments - 1))
 
@@ -319,7 +447,7 @@ class Gauge(_Ranged):
                 rect = Rect(area.x + start, area.y, extent, area.height)
 
             if is_lit:
-                canvas.rect(rect.x, rect.y, rect.width, rect.height, color)
+                canvas.rect(rect.x, rect.y, rect.width, rect.height, self.segment_color(index))
             elif self._track_color is not None:
                 canvas.rect(rect.x, rect.y, rect.width, rect.height, self._track_color)
 

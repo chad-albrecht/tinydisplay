@@ -124,7 +124,7 @@ renders perfectly while quietly ignoring the `color:` you spelled `colour:`.
 | `stack` | Row or column | `axis`, `spacing`, `children` |
 | `grid` | Equal cells | `rows`, `columns`, `spacing`, `children` |
 | `label` | Text | `text`, `color`, `align`, `valign`, `wrap`, `shrink_to_fit`, `font_size` |
-| `gauge` | Segmented meter | `entity`, `min`, `max`, `segments`, `color`, `track_color`, `warning_at`, `warning_color` |
+| `gauge` | Segmented meter | `entity`, `min`, `max`, `segments`, `color`, `track_color`, `thickness`, `zones`, `warning_at`, `warning_color` |
 | `progress` | Continuous bar | `entity`, `min`, `max`, `color`, `track_color`, `radius`, `vertical` |
 | `sparkline` | Value over time | `entity`, `color`, `fill_color`, `min`, `max`, `capacity` |
 | `icon` | One drawn symbol | `icon`, `color`, `thickness` |
@@ -135,10 +135,55 @@ Every node also accepts `name`, `visible`, `padding`, and the layout hints its
 parent reads: `size`, `weight`, `cross_align`, `cross_size` inside a `stack`;
 `row`, `column`, `row_span`, `column_span` inside a `grid`.
 
+### Gauge colour zones
+
+A gauge can colour each segment by where it sits in the range, the way an LED
+bargraph does — green at the bottom, amber, red at the top:
+
+```yaml
+- type: gauge
+  size: 12
+  thickness: 6            # draw a 6px band centred in the 12px slot
+  entity: sensor.processor_temperature
+  min: 30
+  max: 90
+  segments: 24
+  gap: 1
+  track_color: surface
+  zones:
+    - to: 65              # degrees, not a fraction
+      color: success
+    - to: 78
+      color: warning
+    - color: danger       # the last zone runs to the top
+```
+
+**Boundaries are in the gauge's own units.** `to: 65` on a 30..90 gauge means
+65 degrees. That is deliberately unlike `warning_at`, which is a fraction: the
+number a dashboard knows is the one the sensor reports, and raising `max`
+should not quietly slide the green zone up with it. A boundary outside
+`min`..`max` is rejected, which catches `to: 0.8` meaning "80%".
+
+**`zones` and `warning_at` are mutually exclusive**, because they answer
+different questions and giving both would mean picking one silently:
+
+- `warning_at` colours by **value**. The whole lit run turns amber at once,
+  which reads as a state — *this is now too hot*.
+- `zones` colours by **position**. The green end stays green while the tip goes
+  red, so the bar shows headroom as well as level.
+
+Zone colours are fixed when the widget is built, like `track_color`, so they
+take a role or a hex value but not a state mapping.
+
+`thickness` is independent of zones: it draws the bar narrower than its slot
+and centres it, which is how you get a thin band without giving the gauge a
+slot so small that the layout around it has nothing to work with.
+
 The `icon` node's `icon` is one of `circle` `dot` `square` `check` `cross`
 `warning` `info` `plus` `minus` `arrow-up` `arrow-down` `home` `door` `lock`
-`unlock` `lightbulb` `person` `plug` `thermometer` `droplet` `sun` `cloud`
-`wind` `fan` `flame` `bolt` `battery` `power` `wifi` `signal` `clock` `bell`.
+`unlock` `lightbulb` `person` `plug` `thermometer` `droplet` `sun` `moon`
+`cloud` `cloud-sun` `cloud-rain` `cloud-snow` `cloud-lightning` `fog` `wind`
+`fan` `flame` `bolt` `battery` `power` `wifi` `signal` `clock` `bell`.
 Naming one that does not exist is a config error listing the ones that do; the
 list is generated from the widget package, so it cannot drift out of date.
 
@@ -163,6 +208,53 @@ unlike a colour — a `default`. A colour that falls off the end of its mapping
 lands on the theme's `text` role, but there is no such thing as a default
 symbol, and an icon with nothing to draw draws nothing, which reads as a broken
 panel rather than a missing case. Both are checked when the dashboard loads.
+
+### A weather icon
+
+A `weather` entity's state *is* its condition, so a state-mapped icon covers
+the whole forecast. Home Assistant defines fifteen conditions; this maps every
+one of them:
+
+```yaml
+- type: icon
+  size: 56
+  entity: weather.forecast_home
+  icon:
+    sunny: sun
+    clear-night: moon
+    partlycloudy: cloud-sun
+    cloudy: cloud
+    fog: fog
+    rainy: cloud-rain
+    pouring: cloud-rain
+    snowy: cloud-snow
+    snowy-rainy: cloud-snow
+    hail: cloud-snow
+    lightning: cloud-lightning
+    lightning-rainy: cloud-lightning
+    windy: wind
+    windy-variant: wind
+    exceptional: warning
+    default: cloud
+  color:
+    sunny: warning
+    clear-night: muted
+    lightning: warning
+    lightning-rainy: warning
+    exceptional: danger
+    default: text
+```
+
+There is no shorthand for this and deliberately so. A built-in `weather:` node
+would have to decide that `pouring` and `rainy` share a symbol, and that
+`hail` is closer to snow than to rain — judgement calls that belong in your
+dashboard, where you can see them, rather than in a table you would have to go
+reading to find out what your panel is about to draw. Copy the block and change
+what you disagree with.
+
+`default` is doing real work here even though all fifteen conditions are
+listed: a `weather` entity reports `unavailable` while it is starting up and
+`unknown` if its backend fails, and neither is a condition.
 
 The cross-axis hint is `cross_align`, not `align`, because a `label` already
 spends `align` on its text. When both were spelled the same, one key was parsed

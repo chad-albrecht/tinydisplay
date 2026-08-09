@@ -43,7 +43,7 @@ positioning anything.
 | `Spacer` | Occupies space and draws nothing. |
 | `Label` | Text, wrapped, optionally shrink-to-fit. |
 | `ProgressBar` | A continuous fill. |
-| `Gauge` | Discrete segments, with a warning threshold. |
+| `Gauge` | Discrete segments, with a warning threshold or `Zone` colour bands. |
 | `Sparkline` | A series over time, auto-scaled. |
 | `Icon` | One of a small set of drawn symbols. |
 | `ImageWidget` | Anything an icon cannot express. |
@@ -99,14 +99,20 @@ the theme, and need no asset pipeline.
 | --- | --- |
 | Shapes and marks | `circle` `dot` `square` `check` `cross` `warning` `info` `plus` `minus` `arrow-up` `arrow-down` |
 | Home and entity domains | `home` `door` `lock` `unlock` `lightbulb` `person` `plug` |
-| Sensors and weather | `thermometer` `droplet` `sun` `cloud` `wind` `fan` `flame` |
+| Sensors and weather | `thermometer` `droplet` `sun` `moon` `cloud` `cloud-sun` `cloud-rain` `cloud-snow` `cloud-lightning` `fog` `wind` `fan` `flame` |
 | Status and connectivity | `bolt` `battery` `power` `wifi` `signal` `clock` `bell` |
 
 Part of an arc is reachable by drawing a whole shape under a clip — that is how
-the padlock gets a semicircular shackle. What is out of reach is an arc that has
-to be *subtracted* rather than cropped, because nothing here can erase: hence no
-crescent moon, and a `power` ring closed where the IEC symbol breaks it. For a
-logo or a weather glyph, use `ImageWidget`.
+the padlock gets a semicircular shackle. An arc that has to be *subtracted*
+rather than cropped is reachable by computing the difference instead of erasing
+it: `moon` is a disc minus an offset disc, filled scanline by scanline, the same
+way the triangle and trapezoid fills work. The `power` ring is still closed
+where the IEC symbol breaks it, because that gap is not worth the same trouble.
+For a logo, use `ImageWidget`.
+
+Composite symbols layer their parts in painter's order — `cloud-sun` draws the
+sun first and the cloud over it, so the cloud occludes the sun rather than
+sitting beside it.
 
 ## Not here
 

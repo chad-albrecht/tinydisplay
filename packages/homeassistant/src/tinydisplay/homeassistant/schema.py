@@ -78,6 +78,7 @@ __all__ = [
     "NodeSpec",
     "ScreenSpec",
     "ValueRef",
+    "ZoneSpec",
     "load_dashboard",
     "parse_dashboard",
     "parse_dashboard_yaml",
@@ -187,6 +188,21 @@ class ColorRef:
             resolved: Color = getattr(theme, self.role)
             return resolved
         return theme.text
+
+
+@dataclass(frozen=True, slots=True)
+class ZoneSpec:
+    """One colour band of a gauge, as written in a dashboard.
+
+    Attributes:
+        upto: The top of the band, in the same units as the gauge's ``min``
+            and ``max``. ``None`` for the topmost band, which runs to the top.
+        color: The band's colour. Static, because the widget takes its zones
+            when it is built and cannot be handed new ones per frame.
+    """
+
+    upto: float | None
+    color: ColorRef
 
 
 @dataclass(frozen=True, slots=True)
@@ -805,6 +821,67 @@ def _parse_ranged(mapping: Mapping[str, Any], path: str) -> dict[str, Any]:
     return {"value": _value_ref(mapping, path), "min": minimum, "max": maximum}
 
 
+def _parse_zones(
+    value: Any,
+    path: str,
+    *,
+    minimum: float,
+    maximum: float,
+) -> tuple[ZoneSpec, ...]:
+    """Validate a gauge's colour bands against the range they divide.
+
+    Boundaries are in value units, which makes ``to: 0.8`` on a 30..90 gauge a
+    plausible-looking way to mean "80%" and a dead band in fact. Checking each
+    boundary against the range turns that into a message naming both numbers,
+    which is the only place the mistake is cheap to notice.
+    """
+    if not isinstance(value, list):
+        raise _fail(path, f"expected a list of zones, got {_describe(value)}")
+    if not value:
+        raise _fail(path, "'zones' needs at least one band, or leave it out")
+
+    zones: list[ZoneSpec] = []
+    last = len(value) - 1
+    previous: float | None = None
+    for index, raw in enumerate(value):
+        zone_path = _index_path(path, index)
+        entry = _require_mapping(raw, zone_path)
+        unknown = set(entry) - {"to", "color"}
+        if unknown:
+            named = ", ".join(sorted(unknown))
+            raise _fail(zone_path, f"a zone takes 'to' and 'color'; unknown key(s): {named}")
+        if "color" not in entry:
+            raise _fail(zone_path, "a zone needs 'color'")
+        color = _color(entry["color"], _child_path(zone_path, "color"), static=True)
+
+        if "to" not in entry:
+            if index != last:
+                raise _fail(
+                    zone_path,
+                    "only the last zone may leave out 'to'; the bands after this one "
+                    "would never be reached",
+                )
+            zones.append(ZoneSpec(upto=None, color=color))
+            continue
+
+        upto = _number(entry["to"], _child_path(zone_path, "to"))
+        if not minimum <= upto <= maximum:
+            raise _fail(
+                _child_path(zone_path, "to"),
+                f"{upto} is outside the gauge's range {minimum}..{maximum}; a zone boundary "
+                f"is in the same units as 'min' and 'max', not a fraction",
+            )
+        if previous is not None and upto <= previous:
+            raise _fail(
+                _child_path(zone_path, "to"),
+                f"zone boundaries must increase; {upto} does not follow {previous}",
+            )
+        previous = upto
+        zones.append(ZoneSpec(upto=upto, color=color))
+
+    return tuple(zones)
+
+
 def _parse_gauge(mapping: Mapping[str, Any], path: str) -> dict[str, Any]:
     entity_id = mapping.get("entity") if isinstance(mapping.get("entity"), str) else None
     options = _parse_ranged(mapping, path)
@@ -832,9 +909,26 @@ def _parse_gauge(mapping: Mapping[str, Any], path: str) -> dict[str, Any]:
             ),
         }
     )
+    if "thickness" in mapping:
+        options["thickness"] = _integer(
+            mapping["thickness"], _child_path(path, "thickness"), minimum=1
+        )
     if "track_color" in mapping:
         options["track_color"] = _color(
             mapping["track_color"], _child_path(path, "track_color"), static=True
+        )
+    if "zones" in mapping:
+        if "warning_at" in mapping:
+            raise _fail(
+                path,
+                "give 'zones' or 'warning_at', not both: zones colour each segment by where "
+                "it sits, while warning_at recolours the whole bar once the value crosses it",
+            )
+        options["zones"] = _parse_zones(
+            mapping["zones"],
+            _child_path(path, "zones"),
+            minimum=options["min"],
+            maximum=options["max"],
         )
     if "warning_at" in mapping:
         options["warning_at"] = _number(
@@ -989,6 +1083,8 @@ _NODE_PARSERS: Final[dict[str, _NodeParser]] = {
                 "track_color",
                 "gap",
                 "vertical",
+                "thickness",
+                "zones",
                 "warning_at",
                 "warning_color",
             }

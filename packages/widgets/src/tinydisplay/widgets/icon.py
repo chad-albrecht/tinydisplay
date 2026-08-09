@@ -11,11 +11,19 @@ triangles and trapezoids filled by scanline.
 
 Part of an arc is reachable too, by drawing a whole shape under a clip: the
 padlock's shackle is a rounded rectangle tall enough to have a semicircular
-top, with its lower half clipped away. What stays out of reach is anything
-needing an arc *subtracted* rather than cropped, because nothing here can
-erase. Hence no crescent moon, and a `power` ring that is closed where the IEC
-symbol breaks it. For a logo or a weather glyph, use
-:class:`~tinydisplay.widgets.image.ImageWidget`.
+top, with its lower half clipped away.
+
+Subtraction is reachable by *computing* the difference rather than erasing it.
+The crescent moon is a circle minus an offset circle, filled scanline by
+scanline: each row spans from the outer circle's left edge to wherever the bite
+begins. That is the same technique the triangle and trapezoid fills use, and it
+is why a shape nothing here can erase is still in the set. What stays genuinely
+out of reach is a shape whose difference has no closed form worth writing --
+for a logo, use :class:`~tinydisplay.widgets.image.ImageWidget`.
+
+Composite symbols layer the parts in painter's order, which is how `cloud-sun`
+works: the sun is drawn first and the cloud over it, so the cloud occludes the
+sun's lower left and the pair reads as one behind the other.
 
 Every icon is drawn inside a square inscribed in the widget's bounds, so a
 row of icons in differently-shaped slots still looks like a row of icons.
@@ -23,6 +31,7 @@ row of icons in differently-shaped slots still looks like a row of icons.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
 from typing import TYPE_CHECKING, Final
 
@@ -69,7 +78,13 @@ class IconName(StrEnum):
     THERMOMETER = "thermometer"
     DROPLET = "droplet"
     SUN = "sun"
+    MOON = "moon"
     CLOUD = "cloud"
+    CLOUD_SUN = "cloud-sun"
+    CLOUD_RAIN = "cloud-rain"
+    CLOUD_SNOW = "cloud-snow"
+    CLOUD_LIGHTNING = "cloud-lightning"
+    FOG = "fog"
     WIND = "wind"
     FAN = "fan"
     FLAME = "flame"
@@ -432,16 +447,160 @@ def _draw_sun(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:
         )
 
 
+#: Below this the dome and puffs land on the same pixels and the cloud is a
+#: blob, so it draws nothing instead -- the same call the whole icon makes.
+_MIN_CLOUD_SIDE: Final = 3
+
+#: Below this the crescent's horns are shorter than a pixel and it reads as a
+#: dot.
+_MIN_MOON_RADIUS: Final = 2
+
+
+def _cloud(canvas: Canvas, area: Rect, color: Color) -> None:
+    """Fill a cloud whose bounding box is ``area``.
+
+    Split out from :func:`_draw_cloud` so that every cloud in the set is the
+    same cloud. `cloud`, `cloud-rain` and `fog` differ in what is under them,
+    not in what a cloud looks like, and three hand-placed variants would drift
+    apart the first time one of them was adjusted.
+    """
+    if area.width < _MIN_CLOUD_SIDE or area.height < _MIN_CLOUD_SIDE:
+        return
+    # A circle of radius r is 2r + 1 across, so a dome of area.height // 2
+    # reaches one row past the bottom of the box this promises to fill. The
+    # overshoot hides behind the puffs and only shows up as a composite whose
+    # weather starts inside its own cloud.
+    dome = (area.height - 1) // 2
+    puff = max(1, area.height // 3)
+    base_y = area.bottom - 1
+    left_x = area.x + puff
+    right_x = area.right - 1 - puff
+    canvas.circle(area.center.x, area.y + dome, dome, color, fill=True)
+    canvas.circle(left_x, base_y - puff, puff, color, fill=True)
+    canvas.circle(right_x, base_y - puff, puff, color, fill=True)
+    canvas.rect(left_x, area.y + dome, max(1, right_x - left_x), base_y - area.y - dome, color)
+
+
+#: Where a cloud sits inside a whole-icon box, as fractions of the side. Used
+#: by `cloud` alone; the composites give the cloud less room and put the
+#: weather underneath it.
+_CLOUD_AREA: Final = (10, 25, 80, 55)
+
+
+def _fraction_rect(box: Rect, spec: tuple[int, int, int, int]) -> Rect:
+    """A sub-rectangle of ``box``, from ``(x, y, width, height)`` percentages."""
+    left, top, width, height = spec
+    return Rect(
+        box.x + box.width * left // 100,
+        box.y + box.height * top // 100,
+        max(1, box.width * width // 100),
+        max(1, box.height * height // 100),
+    )
+
+
 def _draw_cloud(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:  # noqa: ARG001
-    dome = max(1, box.width // 4)
-    puff = max(1, box.width // 5)
-    shoulder_y = box.y + box.height * 3 // 5
-    left_x = box.x + box.width * 3 // 10
-    right_x = box.right - 1 - box.width * 3 // 10
-    canvas.circle(box.center.x, box.center.y, dome, color, fill=True)
-    canvas.circle(left_x, shoulder_y, puff, color, fill=True)
-    canvas.circle(right_x, shoulder_y, puff, color, fill=True)
-    canvas.rect(left_x, shoulder_y, max(1, right_x - left_x), puff + 1, color)
+    _cloud(canvas, _fraction_rect(box, _CLOUD_AREA), color)
+
+
+def _draw_moon(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:  # noqa: ARG001
+    """A crescent: a disc minus an offset disc, filled row by row.
+
+    The difference is computed rather than painted over, because nothing here
+    can erase. Each row runs from the disc's left edge to wherever the bite
+    starts, and rows the bite swallows entirely are skipped.
+    """
+    radius = box.width // 2 - 1
+    if radius < _MIN_MOON_RADIUS:
+        return
+    center_x, center_y = box.center.x, box.center.y
+    # A bite nearly as wide as the disc, offset right and slightly up. A
+    # smaller or better-centred one leaves a fat comma rather than a crescent
+    # with horns.
+    bite_radius = radius * 9 // 10
+    bite_x = center_x + radius * 11 // 20
+    bite_y = center_y - radius // 5
+    for offset in range(-radius, radius + 1):
+        half = math.isqrt(radius * radius - offset * offset)
+        left, right = center_x - half, center_x + half
+        from_bite = center_y + offset - bite_y
+        if abs(from_bite) <= bite_radius:
+            bite_half = math.isqrt(bite_radius * bite_radius - from_bite * from_bite)
+            right = min(right, bite_x - bite_half)
+        if right >= left:
+            canvas.rect(left, center_y + offset, right - left + 1, 1, color)
+
+
+#: Where the cloud sits in a composite, leaving the lower third for weather.
+_COMPOSITE_CLOUD: Final = (8, 6, 84, 46)
+
+#: The three columns precipitation falls in, as percentages of the side.
+_FALL_COLUMNS: Final = (26, 50, 74)
+
+
+def _fall_zone(box: Rect) -> tuple[int, int]:
+    """The rows between the composite cloud's underside and the icon's floor."""
+    return box.y + box.height * 60 // 100, box.bottom - 2
+
+
+def _draw_cloud_sun(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:
+    """Partly cloudy: the sun drawn first, the cloud over its lower left."""
+    side = box.width * 54 // 100
+    _draw_sun(canvas, Rect(box.right - side, box.y, side, side), color, thickness)
+    _cloud(canvas, _fraction_rect(box, (2, 44, 80, 46)), color)
+
+
+def _draw_cloud_rain(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:
+    _cloud(canvas, _fraction_rect(box, _COMPOSITE_CLOUD), color)
+    top, bottom = _fall_zone(box)
+    slant = max(1, box.width // 12)
+    streak = max(thickness, box.width // 16)
+    for column in _FALL_COLUMNS:
+        x = box.x + box.width * column // 100
+        canvas.line(x + slant, top, x - slant, bottom, color, thickness=streak)
+
+
+def _draw_cloud_snow(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:  # noqa: ARG001
+    _cloud(canvas, _fraction_rect(box, _COMPOSITE_CLOUD), color)
+    top, bottom = _fall_zone(box)
+    flake = max(1, box.width // 14)
+    # Staggered, because three flakes in a row read as an ellipsis.
+    for index, column in enumerate(_FALL_COLUMNS):
+        x = box.x + box.width * column // 100
+        y = top + (bottom - top) * (index % 2) // 2 + flake
+        canvas.circle(x, y, flake, color, fill=True)
+
+
+def _draw_cloud_lightning(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:
+    _cloud(canvas, _fraction_rect(box, _COMPOSITE_CLOUD), color)
+    # The bolt gets the full lower half rather than the fall zone the streaks
+    # use. Sized to match them it survives to about 40 pixels and then becomes
+    # a smudge, and a lightning icon whose lightning is a smudge is a cloud.
+    side = box.height * 48 // 100
+    _draw_bolt(
+        canvas,
+        Rect(box.center.x - side // 2, box.bottom - 1 - side, max(3, side), max(3, side)),
+        color,
+        max(thickness, box.width // 12),
+    )
+
+
+def _draw_fog(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:
+    """A cloud with haze banded under it.
+
+    Bars alone were the first attempt and read as a list -- four stacked
+    horizontal rules is a menu glyph in every other context. The cloud is what
+    makes them weather.
+    """
+    _cloud(canvas, _fraction_rect(box, _COMPOSITE_CLOUD), color)
+    top, bottom = _fall_zone(box)
+    bar = max(thickness, box.height // 12)
+    if bottom - top < bar * 2:
+        return
+    # Offset opposite ways so the pair reads as drifting rather than as a rule.
+    for index, indent in enumerate((0, 4)):
+        left = box.x + box.width * indent // 20
+        width = box.width - box.width * indent // 20 - box.width * (4 - indent * 2) // 20
+        canvas.rect(left, top + index * (bottom - top - bar), max(1, width), bar, color)
 
 
 def _draw_wind(canvas: Canvas, box: Rect, color: Color, thickness: int) -> None:
@@ -590,7 +749,13 @@ _PAINTERS: dict[IconName, Callable[[Canvas, Rect, Color, int], None]] = {
     IconName.THERMOMETER: _draw_thermometer,
     IconName.DROPLET: _draw_droplet,
     IconName.SUN: _draw_sun,
+    IconName.MOON: _draw_moon,
     IconName.CLOUD: _draw_cloud,
+    IconName.CLOUD_SUN: _draw_cloud_sun,
+    IconName.CLOUD_RAIN: _draw_cloud_rain,
+    IconName.CLOUD_SNOW: _draw_cloud_snow,
+    IconName.CLOUD_LIGHTNING: _draw_cloud_lightning,
+    IconName.FOG: _draw_fog,
     IconName.WIND: _draw_wind,
     IconName.FAN: _draw_fan,
     IconName.FLAME: _draw_flame,

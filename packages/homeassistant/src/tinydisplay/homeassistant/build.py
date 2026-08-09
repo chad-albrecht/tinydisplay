@@ -36,6 +36,7 @@ from tinydisplay.widgets import (
     Spacer,
     Sparkline,
     Stack,
+    Zone,
 )
 
 if TYPE_CHECKING:
@@ -187,6 +188,10 @@ def _build_label(node: NodeSpec, theme: Theme, unavailable: str, updaters: list[
 def _build_gauge(node: NodeSpec, theme: Theme, updaters: list[Updater]) -> Widget:
     options = node.options
     warning_color = options.get("warning_color")
+    specs = options.get("zones")
+    # Zones resolve once here rather than per frame: the widget takes them at
+    # construction, and the schema rejects state-dependent zone colours to say so.
+    zones = [Zone(spec.upto, spec.color.resolve(theme, None)) for spec in specs] if specs else None
     gauge = Gauge(
         options["min"],
         minimum=options["min"],
@@ -194,6 +199,8 @@ def _build_gauge(node: NodeSpec, theme: Theme, updaters: list[Updater]) -> Widge
         segments=options["segments"],
         gap=options["gap"],
         vertical=options["vertical"],
+        thickness=options.get("thickness"),
+        zones=zones,
         warning_at=options.get("warning_at"),
         warning_color=warning_color.resolve(theme, None) if warning_color is not None else None,
         track_color=_optional_color(options.get("track_color"), theme),

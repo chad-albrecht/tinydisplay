@@ -237,6 +237,33 @@ class TestNumericBinding:
         dashboard.update(StaticStateSource({"sensor.a": "150"}))
         assert gauge.fraction == 1.0
 
+    def test_gauge_zones_resolve_against_the_theme(self) -> None:
+        dashboard = build(
+            {
+                "type": "gauge",
+                "entity": "sensor.cpu",
+                "min": 30,
+                "max": 90,
+                "segments": 6,
+                "zones": [
+                    {"to": 65, "color": "success"},
+                    {"to": 78, "color": "warning"},
+                    {"color": "danger"},
+                ],
+            }
+        )
+        gauge = find(dashboard.root, Gauge)
+        theme = dashboard.theme
+        assert [zone.color for zone in gauge.zones] == [theme.success, theme.warning, theme.danger]
+        # Midpoints at 35, 45, 55, 65, 75, 85 over six segments.
+        assert gauge.segment_color(0) == theme.success
+        assert gauge.segment_color(3) == theme.warning
+        assert gauge.segment_color(5) == theme.danger
+
+    def test_gauge_thickness_reaches_the_widget(self) -> None:
+        dashboard = build({"type": "gauge", "entity": "sensor.a", "thickness": 8})
+        assert find(dashboard.root, Gauge).thickness == 8
+
     def test_a_progress_bar_follows_its_entity(self) -> None:
         dashboard = build({"type": "progress", "entity": "sensor.a", "max": 50})
         bar = find(dashboard.root, ProgressBar)

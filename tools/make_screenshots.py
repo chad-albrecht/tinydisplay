@@ -97,7 +97,11 @@ def _states_at(seconds: float) -> StaticStateSource:
         "sensor.h5075_living_room_humidity",
         f"{47 + 5 * math.sin(seconds / 3):.1f}",
     )
-    source.set("sensor.processor_temperature", f"{52 + 8 * math.sin(seconds / 4):.1f}")
+    # Warm rather than idle, so the System screen's zoned band is caught with
+    # its tip in the amber. A gauge whose whole point is where the colour
+    # changes is not shown by a screenshot taken safely below the first
+    # boundary -- that image would be indistinguishable from a plain green bar.
+    source.set("sensor.processor_temperature", f"{70 + 10 * math.sin(seconds / 4):.1f}")
     source.set("sensor.memory_use_percent", f"{63 + 7 * math.sin(seconds / 8):.1f}")
     source.set("sensor.last_boot", (datetime.now(UTC) - UPTIME).isoformat())
     source.set("sensor.speedtest_download", f"{452 + 40 * math.sin(seconds / 5):.1f}")
