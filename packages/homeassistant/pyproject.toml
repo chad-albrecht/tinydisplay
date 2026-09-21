@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tinydisplay-homeassistant"
-version = "0.6.0"
+version = "0.6.1"
 description = "Home Assistant dashboards for TinyDisplay: YAML definitions, entity binding and a change-driven render loop."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,7 @@ license = "MIT"
 keywords = ["display", "home-assistant", "dashboard", "yaml", "embedded"]
 authors = [{ name = "The TinyDisplay authors" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.12",

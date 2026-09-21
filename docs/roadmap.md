@@ -247,6 +247,70 @@ Still open: the options flow against a live panel, and everything about a
 second machine -- which is now the largest unknown here by some distance. See
 [the integration's README](../custom_components/tinydisplay/README.md).
 
+## The road to 1.0
+
+v0.3.0 relabelled the project from *pre-alpha* to **beta**, which is a
+correction rather than an advance: nothing shipped that day, and the old label
+had been wrong for several releases. Five phases are complete, the suite is
+green, and the integration has drawn live state onto a panel from inside the
+Core container. That is not pre-alpha by any reading.
+
+It is not 1.0 either, and the gap is worth stating precisely, because none of
+it is missing *function*. A 1.0 is two promises — that the thing works, and
+that its public surface will not move under you without a major bump. Each item
+below undermines one of those.
+
+**One machine has ever run this.** Every hardware claim in this document —
+orientation, the keep-alive, the 24-hour uptime, disconnect and reload — comes
+from a single AceMagic S1 on one Home Assistant version. Each was worth
+establishing and none of them generalise on their own. The phrase "verified on
+hardware" throughout this file should be read as "verified on *the* hardware".
+
+**The architecture has one unproven load-bearing assumption.** The integration
+exists in the shape it does because the Core container turned out to be able to
+write `/dev/bus/usb` on that machine. If a second machine says `NOT READY`, the
+answer in the integration's README is not a setting to change — it is that the
+panel needs driving from an add-on that talks to Home Assistant over its API.
+That is a different delivery shape, and discovering it after a 1.0 would be a
+poor way to find out. The `StateSource` seam means the rewrite would be
+survivable; it does not make it a non-event.
+
+**The dashboard language makes you name an entity three times.** A node's
+header, its value and its unit each carry the entity id separately, and there
+is no way to say *this node's entity* once. The first real edit anyone made to
+the starter dashboard produced `-` and `--` on the panel, because only one of
+the three got changed. That is a gap in the language, not in the edit. The fix
+is a schema change, and a schema change is exactly the kind of thing a 1.0
+promises not to make — so it belongs before the number, not after.
+
+**Nothing is published back to Home Assistant.** There is no entity and no
+device, so the UI cannot tell you whether the panel is being drawn to. The
+disconnect test is the argument: the panel sat dead with the config entry still
+reporting itself healthy, and one line in the log was the only thing that knew.
+For an integration declaring `integration_type: device`, that is a 1.0-level
+gap. A binary sensor fed by `on_frame` closes it.
+
+**The options flow has never been submitted against a live panel.** The reload
+half is proven — a reload is what an option change triggers, and that was
+exercised by the disconnect test — but nobody has pressed the button. The
+cheapest item here by a wide margin.
+
+**`acemagic_lcd_led` has never been ruled out.** That separate custom
+integration drives the same class of panel, and if it is installed and active
+it may hold USB interface 1 against this one. A `Resource busy` seen during the
+Phase 5 orientation sweep was blamed at the time on a stale process of ours,
+which may simply have been wrong. Until someone checks
+`ls /config/custom_components/` on a machine showing an intermittent panel
+fault, contention stays on the list of things that could be happening.
+
+One more thing changes character at 1.0 without being a blocker. The manifest's
+URL requirements are mutually exclusive with hassfest, so the HACS default
+store is closed to this project by construction — see the integration's README.
+Custom-repository installation is a reasonable ask of a beta's audience. A 1.0
+invites people for whom it is friction, and publishing the four packages to
+PyPI is the documented way back. Worth deciding deliberately rather than
+discovering.
+
 ## Beyond
 
 - Partial-region updates driven by the existing dirty tracking.

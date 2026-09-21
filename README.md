@@ -21,10 +21,15 @@ and the colour shift are real, and a camera would add the bezel and the
 backlight and nothing else. [`tools/make_screenshots.py`](tools/make_screenshots.py)
 regenerates them.
 
-> **Status: pre-alpha.** All five packages are implemented and tested, and the
+> **Status: beta.** All five packages are implemented and tested, and the
 > integration is **confirmed on hardware** — an AceMagic S1's built-in panel,
 > driven from inside Home Assistant's own Core container, drawing live entity
 > state the right way up.
+>
+> It said *pre-alpha* until v0.3.0, which had stopped being true some releases
+> earlier. What holds it short of 1.0 now is not missing function but missing
+> evidence, and the shape of that is written down: [The road to
+> 1.0](docs/roadmap.md#the-road-to-10).
 >
 > **Installing takes no manual steps.** Add the repository to HACS, download,
 > restart, and configure. Home Assistant installs the Python packages itself.
@@ -50,7 +55,9 @@ regenerates them.
 >
 > **Not established:** the options flow against live hardware, and whether any of
 > this holds on a second machine. One appliance has run it, and that is the
-> largest unknown by some distance.
+> largest unknown by some distance — and the reason this is not 1.0. A version
+> number that promises a stable API should rest on more than one machine's
+> say-so.
 
 ## Why
 

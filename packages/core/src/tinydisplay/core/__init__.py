@@ -44,7 +44,7 @@ from tinydisplay.core.font import (
 from tinydisplay.core.geometry import Point, Rect, Size
 from tinydisplay.core.widget import Container, Widget
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "DEFAULT_FONT_SIZE",

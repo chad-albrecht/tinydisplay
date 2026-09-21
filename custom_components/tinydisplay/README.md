@@ -2,7 +2,7 @@
 
 Draws a Home Assistant dashboard onto a small hardware panel.
 
-> **Pre-alpha.** Installation is now the ordinary HACS one — download, restart,
+> **Beta.** Installation is now the ordinary HACS one — download, restart,
 > add the integration — but one thing still stands between that and a working
 > panel, and it may not be solvable from inside an integration at all. Read
 > [Before you start](#before-you-start) first: it is a five-minute check that
@@ -443,7 +443,13 @@ time, since a reload is both. See
 - The options flow itself. Changing an option reloads the entry, and the reload
   half is now proven, but nobody has submitted that form against a live panel.
 - Whether any of this holds on a second machine. One appliance has run it, and
-  that is the largest unknown by some distance.
+  that is the largest unknown by some distance. Read every "verified on
+  hardware" here as "verified on *the* hardware".
+- Whether `acemagic_lcd_led` fights this integration for the panel. That
+  separate custom integration drives the same class of device and may hold USB
+  interface 1. Check `ls /config/custom_components/` before debugging any
+  intermittent panel fault — a `Resource busy` during Phase 5 was blamed on a
+  stale process of ours and may not have been one.
 
 **Rough edges.**
 
@@ -454,3 +460,11 @@ time, since a reload is both. See
   line in the log was the only thing that knew. A binary sensor fed by
   `on_frame` would say it on the dashboard.
 - No service to reload a dashboard without reloading the entry.
+- A dashboard node names its entity three times — in its header, its value and
+  its unit — and there is no way to say *this node's entity* once. Change one
+  and forget the others and the panel shows `-` and `--`, which is what
+  happened on the first real edit anyone made to the starter. This is a gap in
+  the dashboard language, and fixing it is a schema change.
+
+Why this is beta and not 1.0, and what would close the gap, is in
+[the roadmap](../../docs/roadmap.md#the-road-to-10).

@@ -110,7 +110,7 @@ from tinydisplay.ht32.usbfs import (
     usb_interfaces,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "CHUNK_COUNT",

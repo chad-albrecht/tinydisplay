@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tinydisplay-widgets"
-version = "0.4.0"
+version = "0.4.1"
 description = "Widget library for TinyDisplay: layout, labels, gauges and theming for small panels."
 readme = "README.md"
 requires-python = ">=3.12"
@@ -12,7 +12,7 @@ license = "MIT"
 keywords = ["display", "widgets", "layout", "dashboard", "embedded"]
 authors = [{ name = "The TinyDisplay authors" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3.12",
