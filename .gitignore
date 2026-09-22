@@ -46,3 +46,8 @@ uv.lock
 .idea/
 .DS_Store
 Thumbs.db
+
+# Claude Code. The project settings are shared -- they are what stops a release
+# turning into a queue of permission prompts. The `.local` half is personal to
+# whoever is sitting here and belongs to no commit.
+.claude/settings.local.json
