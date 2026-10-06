@@ -20,10 +20,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from homeassistant.components.image import ImageEntity
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import EntityCategory
 
-from .const import DOMAIN
+from .entity import device_info
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -61,13 +60,7 @@ class TinyDisplayPreview(ImageEntity):
         super().__init__(hass)
         self._runtime: TinyDisplayRuntime = entry.runtime_data
         self._attr_unique_id = f"{entry.entry_id}_preview"
-        self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, entry.entry_id)},
-            name=entry.title,
-            manufacturer="TinyDisplay",
-            model=self._runtime.driver.name,
-            sw_version=self._runtime.driver_version,
-        )
+        self._attr_device_info = device_info(entry)
 
     @property
     def image_last_updated(self) -> datetime | None:

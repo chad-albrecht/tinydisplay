@@ -53,6 +53,8 @@ if TYPE_CHECKING:
 
     from homeassistant.core import Event, HomeAssistant
 
+    from .leds import TinyDisplayLeds
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -150,6 +152,9 @@ class TinyDisplayRuntime:
     driver: DisplayDriver
     source: HassStateSource
     options: Mapping[str, Any] = field(default_factory=dict)
+    #: The S1's light bar, when this machine has one. Separate hardware from
+    #: the panel, so its absence never stops the panel from drawing.
+    leds: TinyDisplayLeds | None = None
 
     _changed: asyncio.Event = field(default_factory=asyncio.Event, init=False)
     _task: asyncio.Task[int] | None = field(default=None, init=False)

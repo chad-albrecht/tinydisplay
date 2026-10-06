@@ -27,7 +27,15 @@ from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from tinydisplay.core import TinyDisplayError
 from tinydisplay.homeassistant import Dashboard, DashboardConfigError
 
-from .const import CONF_DASHBOARD, CONF_DRIVER, CONF_SERIAL_NUMBER, DRIVER_MEMORY, PLATFORMS
+from .const import (
+    CONF_DASHBOARD,
+    CONF_DRIVER,
+    CONF_SERIAL_NUMBER,
+    DRIVER_HT32,
+    DRIVER_MEMORY,
+    PLATFORMS,
+)
+from .leds import async_open_leds
 from .runtime import HassStateSource, TinyDisplayRuntime, create_driver
 
 if TYPE_CHECKING:
@@ -71,11 +79,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry) 
         message = f"cannot open the {driver_name} panel: {exc}"
         raise ConfigEntryNotReady(message) from exc
 
+    # The light bar sits on its own serial bridge next to the HT32 panel. Only
+    # looked for alongside real hardware, and never a reason to fail setup.
+    leds = await async_open_leds() if driver_name == DRIVER_HT32 else None
+
     runtime = TinyDisplayRuntime(
         dashboard=dashboard,
         driver=driver,
         source=HassStateSource(hass),
         options=dict(entry.options),
+        leds=leds,
     )
     # Attached before starting, because the preview entity reads it from the
     # entry the moment the platform constructs it.
@@ -89,6 +102,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry) 
         # attempt fails the next one for a reason that looks nothing like this.
         await runtime.async_stop()
         await driver.disconnect()
+        if leds is not None:
+            await leds.async_close()
         raise
 
     _LOGGER.debug(
@@ -106,6 +121,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry)
     """Stop the render loop and release the panel."""
     unloaded = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
     await entry.runtime_data.async_stop()
+    if entry.runtime_data.leds is not None:
+        await entry.runtime_data.leds.async_close()
     return unloaded
 
 

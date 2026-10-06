@@ -46,6 +46,16 @@
       "preview": {
         "name": "Panel preview"
       }
+    },
+    "light": {
+      "light_bar": {
+        "name": "Light bar"
+      }
+    },
+    "number": {
+      "light_bar_speed": {
+        "name": "Light bar speed"
+      }
     }
   }
 }

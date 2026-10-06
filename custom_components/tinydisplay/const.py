@@ -15,7 +15,7 @@ DOMAIN: Final = "tinydisplay"
 #: integration usefully publishes back: it answers both "is it rendering?" and
 #: "what does it look like?", which otherwise need container logs and a walk to
 #: wherever the panel is.
-PLATFORMS: Final = ["image"]
+PLATFORMS: Final = ["image", "light", "number"]
 
 #: How often the dashboard file is checked for edits. Frequent enough that
 #: saving in the file editor feels immediate, rare enough to be one `stat` call
