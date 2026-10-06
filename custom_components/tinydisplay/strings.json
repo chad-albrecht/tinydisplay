@@ -31,12 +31,14 @@
         "data": {
           "min_interval": "Minimum seconds between repaints",
           "max_interval": "Maximum seconds between repaints",
-          "landscape": "Landscape orientation"
+          "landscape": "Landscape orientation",
+          "upside_down": "Upside down"
         },
         "data_description": {
           "min_interval": "A floor, so that a burst of state changes becomes one repaint rather than a dozen.",
           "max_interval": "A ceiling, so the panel refreshes even when nothing has changed.",
-          "landscape": "Turn off to draw the short way round."
+          "landscape": "Turn off to draw the short way round (170x320).",
+          "upside_down": "Turn the picture half a revolution, for a unit standing the other way round."
         }
       }
     }

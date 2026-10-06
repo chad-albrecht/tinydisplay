@@ -35,12 +35,12 @@ from tinydisplay.homeassistant import (
 )
 
 from .const import (
-    CONF_LANDSCAPE,
     CONF_MAX_INTERVAL,
     CONF_MIN_INTERVAL,
     DEFAULT_LANDSCAPE,
     DEFAULT_MAX_INTERVAL,
     DEFAULT_MIN_INTERVAL,
+    DEFAULT_UPSIDE_DOWN,
     DRIVER_HT32,
     MEMORY_PANEL_HEIGHT,
     MEMORY_PANEL_WIDTH,
@@ -81,6 +81,8 @@ def create_driver(
     driver: str,
     *,
     serial_number: str | None = None,
+    landscape: bool = DEFAULT_LANDSCAPE,
+    upside_down: bool = DEFAULT_UPSIDE_DOWN,
 ) -> DisplayDriver:
     """Build the display driver named by a config entry.
 
@@ -96,11 +98,18 @@ def create_driver(
         # extra failed to install -- still loads this integration.
         from tinydisplay.ht32 import HT32Driver  # noqa: PLC0415
 
-        return HT32Driver(serial_number=serial_number)
+        # Orientation is software rotation: the panel's own command is inert
+        # on the S1. The S1 needs its half turn to be the right way up, so
+        # "upside down" means leaving it out.
+        return HT32Driver(
+            serial_number=serial_number,
+            portrait=not landscape,
+            rotate_180=not upside_down,
+        )
 
     return MemoryDriver(
-        MEMORY_PANEL_WIDTH,
-        MEMORY_PANEL_HEIGHT,
+        MEMORY_PANEL_WIDTH if landscape else MEMORY_PANEL_HEIGHT,
+        MEMORY_PANEL_HEIGHT if landscape else MEMORY_PANEL_WIDTH,
         name="TinyDisplay preview",
         # A render loop left running for a week must not accumulate a week of
         # frames; only the most recent one is ever of interest.
@@ -284,9 +293,12 @@ class TinyDisplayRuntime:
                 min_interval=float(self.options.get(CONF_MIN_INTERVAL, DEFAULT_MIN_INTERVAL)),
                 max_interval=float(self.options.get(CONF_MAX_INTERVAL, DEFAULT_MAX_INTERVAL)),
                 keepalive=keepalive_for(self.driver),
+                # Frames are turned in software, but the firmware draws its own
+                # disconnection banner and only the orientation command turns
+                # that -- so it still has to match the driver's orientation.
                 on_connect=on_connect_for(
                     self.driver,
-                    landscape=bool(self.options.get(CONF_LANDSCAPE, DEFAULT_LANDSCAPE)),
+                    landscape=not getattr(self.driver, "portrait", False),
                 ),
                 on_frame=self._note_frame,
             )

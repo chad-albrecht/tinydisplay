@@ -85,6 +85,12 @@ class HT32Driver(DisplayDriver):
             so a frame sent as drawn appears rotated -- and the panel's own
             orientation command does not fix it, because that command is
             inert on this firmware. See :meth:`encode`.
+        portrait: Draw the short way round. The driver then reports itself as
+            170x320 and hands out canvases that size, and turns each frame a
+            quarter revolution clockwise into the panel's 320x170 buffer --
+            the same software rotation the upstream Rust daemon uses, since
+            the panel's own orientation command does nothing. Combined with
+            ``rotate_180`` (applied after) this covers all four orientations.
     """
 
     def __init__(
@@ -97,10 +103,11 @@ class HT32Driver(DisplayDriver):
         reconnect_attempts: int = DEFAULT_RECONNECT_ATTEMPTS,
         reconnect_delay: float = DEFAULT_RECONNECT_DELAY,
         rotate_180: bool = True,
+        portrait: bool = False,
     ) -> None:
         super().__init__(
-            PANEL_WIDTH,
-            PANEL_HEIGHT,
+            PANEL_HEIGHT if portrait else PANEL_WIDTH,
+            PANEL_WIDTH if portrait else PANEL_HEIGHT,
             pixel_format=PANEL_PIXEL_FORMAT,
             name=name or "HT32",
         )
@@ -115,6 +122,7 @@ class HT32Driver(DisplayDriver):
         )
         self._owns_transport = transport is None
         self._rotate_180 = rotate_180
+        self._portrait = portrait
         self._auto_reconnect = auto_reconnect
         self._reconnect_attempts = reconnect_attempts
         self._reconnect_delay = reconnect_delay
@@ -160,6 +168,11 @@ class HT32Driver(DisplayDriver):
         """Whether frames are turned half a revolution before encoding."""
         return self._rotate_180
 
+    @property
+    def portrait(self) -> bool:
+        """Whether frames are drawn 170x320 and turned a quarter revolution."""
+        return self._portrait
+
     # -- Encoding ----------------------------------------------------------
 
     def encode(self, canvas: Canvas) -> bytes:
@@ -192,12 +205,19 @@ class HT32Driver(DisplayDriver):
         rather than ours.
         """
         data = super().encode(canvas)
-        if not self._rotate_180:
+        if not self._portrait and not self._rotate_180:
             return data
         # uint16 because a pixel is two bytes; the values are never
         # interpreted, only reordered, so the panel's byte order is preserved
         # whatever this machine's endianness happens to be.
-        return np.frombuffer(data, dtype=np.uint16)[::-1].tobytes()
+        pixels = np.frombuffer(data, dtype=np.uint16)
+        if self._portrait:
+            # A quarter turn clockwise: the canvas's top edge lands on the
+            # panel's right edge. k=-1 is clockwise in numpy's convention.
+            pixels = np.rot90(pixels.reshape(PANEL_WIDTH, PANEL_HEIGHT), k=-1).ravel()
+        if self._rotate_180:
+            pixels = pixels[::-1]
+        return np.ascontiguousarray(pixels).tobytes()
 
     # -- Driver hooks ------------------------------------------------------
 

@@ -27,7 +27,17 @@ from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
 from tinydisplay.core import TinyDisplayError
 from tinydisplay.homeassistant import Dashboard, DashboardConfigError
 
-from .const import CONF_DASHBOARD, CONF_DRIVER, CONF_SERIAL_NUMBER, DRIVER_MEMORY, PLATFORMS
+from .const import (
+    CONF_DASHBOARD,
+    CONF_DRIVER,
+    CONF_LANDSCAPE,
+    CONF_SERIAL_NUMBER,
+    CONF_UPSIDE_DOWN,
+    DEFAULT_LANDSCAPE,
+    DEFAULT_UPSIDE_DOWN,
+    DRIVER_MEMORY,
+    PLATFORMS,
+)
 from .runtime import HassStateSource, TinyDisplayRuntime, create_driver
 
 if TYPE_CHECKING:
@@ -53,7 +63,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: TinyDisplayConfigEntry) 
     driver_name = entry.data.get(CONF_DRIVER, DRIVER_MEMORY)
     try:
         driver = await hass.async_add_executor_job(
-            lambda: create_driver(driver_name, serial_number=entry.data.get(CONF_SERIAL_NUMBER))
+            lambda: create_driver(
+                driver_name,
+                serial_number=entry.data.get(CONF_SERIAL_NUMBER),
+                landscape=bool(entry.options.get(CONF_LANDSCAPE, DEFAULT_LANDSCAPE)),
+                upside_down=bool(entry.options.get(CONF_UPSIDE_DOWN, DEFAULT_UPSIDE_DOWN)),
+            )
         )
         # Opened here rather than left to the render loop. Building a driver
         # only *selects* a transport -- it touches no hardware -- so a panel

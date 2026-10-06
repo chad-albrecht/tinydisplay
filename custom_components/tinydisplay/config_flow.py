@@ -35,9 +35,11 @@ from .const import (
     CONF_MAX_INTERVAL,
     CONF_MIN_INTERVAL,
     CONF_SERIAL_NUMBER,
+    CONF_UPSIDE_DOWN,
     DEFAULT_LANDSCAPE,
     DEFAULT_MAX_INTERVAL,
     DEFAULT_MIN_INTERVAL,
+    DEFAULT_UPSIDE_DOWN,
     DOMAIN,
     DRIVER_HT32,
     DRIVER_MEMORY,
@@ -198,6 +200,10 @@ class TinyDisplayOptionsFlow(OptionsFlow):
                 vol.Optional(
                     CONF_LANDSCAPE,
                     default=options.get(CONF_LANDSCAPE, DEFAULT_LANDSCAPE),
+                ): bool,
+                vol.Optional(
+                    CONF_UPSIDE_DOWN,
+                    default=options.get(CONF_UPSIDE_DOWN, DEFAULT_UPSIDE_DOWN),
                 ): bool,
             }
         )

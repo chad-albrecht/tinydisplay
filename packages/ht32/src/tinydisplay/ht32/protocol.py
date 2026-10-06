@@ -162,7 +162,10 @@ class SubCommand(IntEnum):
 
 #: Byte 4 of an orientation command, as upstream writes them.
 #:
-#: **These do nothing on the AceMagic S1.** An earlier version of this comment
+#: **These do not turn host frames on the AceMagic S1** -- but they do turn the
+#: firmware's own disconnection banner, which is drawn by the panel rather than
+#: sent by the host. Portrait is therefore 0x02 *plus* software rotation of
+#: every frame; see the driver's ``portrait``. An earlier version of this comment
 #: said "confirmed against hardware"; that was never true. The only bring-up
 #: that had run went through the ``frame`` subcommand, which sends no
 #: orientation packet at all, so what had been confirmed was the panel's
@@ -331,12 +334,11 @@ def device_payload(packet: bytes) -> bytes:
 def build_orientation_packet(*, landscape: bool = True) -> bytes:
     """Build the orientation command upstream sends.
 
-    **This has no observable effect on an AceMagic S1.** Values 0x00 through
-    0x04 were swept against a real panel and none of them changed the image,
-    so the command appears to be unimplemented in this firmware. The framing is
-    still known to be right -- it is the same config packet as the heartbeat --
-    so this is kept for panels that may honour it, and for anyone probing
-    further with :func:`build_config_packet`.
+    **On an AceMagic S1 this does not turn host frames.** Values 0x00 through
+    0x04 were swept against a real panel and none of them changed the image.
+    It does turn the firmware's own disconnection banner, though: send portrait
+    (0x02) when drawing portrait, or the banner comes up sideways. The frames
+    themselves are rotated in software by the driver's ``portrait``.
 
     Do not reach for this to correct a sideways or upside-down picture. On the
     S1 the panel is mounted upside down and the host compensates; see

@@ -385,3 +385,45 @@ class TestRotation:
         # final payload byte pair of the last chunk.
         payload_end = REPORT_SIZE + HEADER_SIZE + CHUNK_SIZES[-1]
         assert transport.packets[-1][payload_end - 2 : payload_end] == b"\xff\xff"
+
+
+class TestPortrait:
+    """Portrait is software rotation: the panel's orientation command is inert."""
+
+    def test_landscape_is_the_default(self) -> None:
+        driver = HT32Driver(transport=RecordingHidTransport())
+        assert driver.portrait is False
+        assert (driver.width, driver.height) == (PANEL_WIDTH, PANEL_HEIGHT)
+
+    def test_portrait_swaps_the_reported_size(self) -> None:
+        driver = HT32Driver(transport=RecordingHidTransport(), portrait=True)
+        assert (driver.width, driver.height) == (PANEL_HEIGHT, PANEL_WIDTH)
+        canvas = driver.create_canvas()
+        assert (canvas.width, canvas.height) == (PANEL_HEIGHT, PANEL_WIDTH)
+        assert len(driver.encode(canvas)) == driver.frame_size
+
+    def test_portrait_rejects_a_landscape_canvas(self) -> None:
+        driver = HT32Driver(transport=RecordingHidTransport(), portrait=True)
+        with pytest.raises(DriverError):
+            driver.encode(Canvas(PANEL_WIDTH, PANEL_HEIGHT))
+
+    @staticmethod
+    def _marked() -> Canvas:
+        canvas = Canvas(PANEL_HEIGHT, PANEL_WIDTH)
+        canvas.clear(Color.BLACK)
+        canvas.rect(0, 0, 8, 8, Color.from_hex("#ff0000"))
+        canvas.rect(PANEL_HEIGHT - 20, PANEL_WIDTH - 10, 20, 10, Color.from_hex("#00ff00"))
+        return canvas
+
+    def test_portrait_matches_a_clockwise_image_rotation(self) -> None:
+        canvas = self._marked()
+        driver = HT32Driver(transport=RecordingHidTransport(), portrait=True, rotate_180=False)
+        # Pillow's rotate() is anticlockwise, so -90 is a quarter turn clockwise.
+        turned = Canvas.from_pil(canvas.to_pil().rotate(-90, expand=True))
+        assert driver.encode(canvas) == turned.to_rgb565(byte_order="big")
+
+    def test_portrait_with_rotate_180_turns_anticlockwise(self) -> None:
+        canvas = self._marked()
+        driver = HT32Driver(transport=RecordingHidTransport(), portrait=True)
+        turned = Canvas.from_pil(canvas.to_pil().rotate(90, expand=True))
+        assert driver.encode(canvas) == turned.to_rgb565(byte_order="big")

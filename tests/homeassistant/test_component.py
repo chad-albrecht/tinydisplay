@@ -330,6 +330,7 @@ class TestTranslations:
             const.CONF_MIN_INTERVAL,
             const.CONF_MAX_INTERVAL,
             const.CONF_LANDSCAPE,
+            const.CONF_UPSIDE_DOWN,
         }
 
     def test_every_entity_has_a_name(self) -> None:

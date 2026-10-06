@@ -48,6 +48,10 @@ CONF_MAX_INTERVAL: Final = "max_interval"
 #: Whether the panel should draw the long way round.
 CONF_LANDSCAPE: Final = "landscape"
 
+#: Whether to turn the picture half a revolution from its usual way up, for a
+#: unit standing the other way round.
+CONF_UPSIDE_DOWN: Final = "upside_down"
+
 # -- Drivers ---------------------------------------------------------------
 
 #: The HT32 panel: 320x170, RGB565, raw USB. The only hardware driver so far.
@@ -64,6 +68,7 @@ DRIVERS: Final = (DRIVER_HT32, DRIVER_MEMORY)
 DEFAULT_MIN_INTERVAL: Final = 0.2
 DEFAULT_MAX_INTERVAL: Final = 30.0
 DEFAULT_LANDSCAPE: Final = True
+DEFAULT_UPSIDE_DOWN: Final = False
 
 #: Shipped with the integration and copied into the config directory the first
 #: time setup runs, so that a fresh install has something valid to point at.
